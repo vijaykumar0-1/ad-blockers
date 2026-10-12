@@ -1,6 +1,8 @@
 // LocalBlock service worker.
-// Handles pausing (per site and everywhere) and the blocked-count badge.
-// This file makes no network requests of its own.
+// Handles pausing (per site and everywhere), the blocked-count badge and cosmetic filtering.
+// It makes no network requests; rules/cosmetic.json is read from inside the extension.
+
+import { hostCandidates, pagePlan, selectorsForTokens, toCss } from "./cosmetic-lookup.js";
 
 // Every static ruleset declared in manifest.json (base, easylist, easyprivacy, ...).
 const RULESETS = chrome.runtime
@@ -66,13 +68,80 @@ async function setSitePaused(host, paused) {
       removeRuleIds: [existing.id],
     });
   }
+  pauseCache = null;
 }
+
+// Paused state is needed on every page load, so keep it in memory.
+let pauseCache = null;
+async function pauseState() {
+  if (!pauseCache) {
+    pauseCache = (async () => ({
+      everywhere: (await getState()).pausedEverywhere,
+      sites: new Set(await listPausedSites()),
+    }))();
+  }
+  return pauseCache;
+}
+chrome.storage.onChanged.addListener(() => (pauseCache = null));
 
 async function listPausedSites() {
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   return rules
     .filter((r) => r.action.type === "allowAllRequests")
     .flatMap((r) => r.condition.requestDomains || []);
+}
+
+// ---- cosmetic filtering ------------------------------------------------
+
+let cosmeticData = null;
+function loadCosmetic() {
+  cosmeticData ||= fetch(chrome.runtime.getURL("rules/cosmetic.json")).then((r) => r.json());
+  return cosmeticData;
+}
+
+// Plans per document, so each frame's selectors are computed once.
+const plans = new Map();
+chrome.tabs.onRemoved.addListener((tabId) => {
+  for (const key of plans.keys()) if (key.startsWith(tabId + ":")) plans.delete(key);
+});
+
+function hostOf(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.hostname : "";
+  } catch {
+    return "";
+  }
+}
+
+async function planFor(sender) {
+  const key = `${sender.tab.id}:${sender.documentId || sender.frameId}`;
+  if (plans.has(key)) return plans.get(key);
+  const plan = (async () => {
+    // about:blank and srcdoc frames inherit their parent's origin.
+    const host = hostOf(sender.origin) || hostOf(sender.url);
+    const topHost = hostOf(sender.tab.url) || host;
+    if (!host) return null;
+    const pause = await pauseState();
+    if (pause.everywhere || hostCandidates(topHost).some((h) => pause.sites.has(normalizeHost(h)))) {
+      return null;
+    }
+    return pagePlan(await loadCosmetic(), host);
+  })();
+  plans.set(key, plan);
+  if (plans.size > 500) plans.delete(plans.keys().next().value);
+  return plan;
+}
+
+async function injectCss(sender, selectors) {
+  if (!selectors.length) return;
+  const target = sender.documentId
+    ? { tabId: sender.tab.id, documentIds: [sender.documentId] }
+    : { tabId: sender.tab.id, frameIds: [sender.frameId] };
+  // USER-origin CSS outranks the page's own !important styles and is invisible to the page.
+  await chrome.scripting
+    .insertCSS({ target, css: toCss(selectors), origin: "USER" })
+    .catch(() => undefined); // the frame may already be gone
 }
 
 // ---- lifecycle -----------------------------------------------------------
@@ -91,8 +160,9 @@ async function init() {
 chrome.runtime.onInstalled.addListener(init);
 chrome.runtime.onStartup.addListener(init);
 
-// ---- messages from the popup --------------------------------------------
+// ---- messages -------------------------------------------------------------
 
+// From the popup (an extension page, so no sender.tab).
 const handlers = {
   async getStatus({ host }) {
     host = normalizeHost(host);
@@ -113,10 +183,29 @@ const handlers = {
   },
 };
 
+// From LocalBlock's content script running in web pages.
+const contentHandlers = {
+  async "cosmetic:page"(msg, sender) {
+    const plan = await planFor(sender);
+    if (!plan) return { active: false };
+    await injectCss(sender, plan.selectors);
+    return { active: plan.generic };
+  },
+  async "cosmetic:tokens"(msg, sender) {
+    const plan = await planFor(sender);
+    if (!plan || !Array.isArray(msg.tokens)) return {};
+    const tokens = msg.tokens.filter((t) => typeof t === "string").slice(0, 5000);
+    await injectCss(sender, selectorsForTokens(await loadCosmetic(), tokens, plan));
+    return {};
+  },
+};
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Only accept messages from this extension's own pages.
-  if (sender.id !== chrome.runtime.id || !handlers[msg?.type]) return false;
-  handlers[msg.type](msg)
+  if (sender.id !== chrome.runtime.id) return false;
+  // Pages can only reach the content-script handlers; only the popup can change settings.
+  const handler = sender.tab ? contentHandlers[msg?.type] : handlers[msg?.type];
+  if (!handler) return false;
+  handler(msg, sender)
     .then((result) => sendResponse({ ok: true, result }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true; // keep the channel open for the async response

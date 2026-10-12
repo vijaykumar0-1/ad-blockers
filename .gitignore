@@ -1,7 +1,5 @@
 # Downloaded filter lists (rebuild with: npm run fetch-lists)
 lists/
-# Cosmetic filters extracted at build time; packaged once cosmetic filtering ships
-rules/*.cosmetic.txt
 node_modules/
 *.zip
 .DS_Store

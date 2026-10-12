@@ -1,18 +1,38 @@
 {
   "manifest_version": 3,
   "name": "LocalBlock",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A small, auditable ad blocker. Everything runs on your machine; nothing about your browsing is sent anywhere.",
   "minimum_chrome_version": "121",
   "permissions": [
     "declarativeNetRequest",
     "storage",
-    "activeTab"
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/cosmetic.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
   "action": {
     "default_title": "LocalBlock",
     "default_popup": "src/popup.html"

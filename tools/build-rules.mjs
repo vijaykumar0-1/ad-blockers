@@ -4,14 +4,16 @@
 //   rules/easylist.json     from lists/easylist.txt     (run tools/fetch-lists.mjs first)
 //   rules/easyprivacy.json  from lists/easyprivacy.txt
 //
-// Cosmetic (##) filters are saved to rules/<list>.cosmetic.txt for the cosmetic-filtering
-// feature. Usage: node tools/build-rules.mjs
+//   rules/cosmetic.json     element-hiding (##) filters from both lists
+//
+// Usage: node tools/build-rules.mjs
 // No dependencies, no network access.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertList, validateRule } from "./abp2dnr.mjs";
+import { compileCosmetic } from "./cosmetic.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -69,15 +71,17 @@ function main() {
   total += write("base", base);
   console.log(`base         ${base.length} rules`);
 
+  const listTexts = [];
   for (const id of ["easylist", "easyprivacy"]) {
     const src = join(root, "lists", `${id}.txt`);
     if (!existsSync(src)) {
       console.log(`${id.padEnd(12)} skipped (run: node tools/fetch-lists.mjs)`);
       continue;
     }
-    const { rules, cosmetic, stats } = convertList(readFileSync(src, "utf8"));
+    const text = readFileSync(src, "utf8");
+    listTexts.push(text);
+    const { rules, stats } = convertList(text);
     total += write(id, rules);
-    writeFileSync(join(root, "rules", `${id}.cosmetic.txt`), cosmetic.join("\n") + "\n");
     const skipped = Object.values(stats.skipped).reduce((a, b) => a + b, 0);
     const top = Object.entries(stats.skipped)
       .sort((a, b) => b[1] - a[1])
@@ -86,11 +90,22 @@ function main() {
       .join(", ");
     console.log(
       `${id.padEnd(12)} ${rules.length} rules from ${stats.converted} of ${stats.network} network filters ` +
-        `(${skipped} skipped: ${top}); ${stats.cosmetic} cosmetic filters saved`
+        `(${skipped} skipped: ${top})`
     );
   }
 
-  console.log(`total        ${total} rules (Chrome guarantees ${GUARANTEED_STATIC_RULES})`);
+  if (listTexts.length) {
+    const { data, stats } = compileCosmetic(listTexts);
+    writeFileSync(join(root, "rules", "cosmetic.json"), JSON.stringify(data));
+    const keyed = Object.values(data.generic.keyed).reduce((a, b) => a + b.length, 0);
+    console.log(
+      `cosmetic     ${keyed} keyed + ${data.generic.unkeyed.length} always-on generic selectors, ` +
+        `${Object.keys(data.specific).length} sites with specific selectors, ` +
+        `${Object.keys(data.exceptions).length} sites with exceptions; skipped ${JSON.stringify(stats.skipped)}`
+    );
+  }
+
+  console.log(`network      ${total} rules (Chrome guarantees ${GUARANTEED_STATIC_RULES})`);
   if (total > GUARANTEED_STATIC_RULES) {
     console.warn("warning: above Chrome's guaranteed minimum; may not all load if other extensions use the shared pool");
   }
