@@ -2,8 +2,11 @@
 // Handles pausing (per site and everywhere) and the blocked-count badge.
 // This file makes no network requests of its own.
 
-const BASE_RULESET = "base";
-const ALLOW_PRIORITY = 100; // must beat the block rules (priority 1)
+// Every static ruleset declared in manifest.json (base, easylist, easyprivacy, ...).
+const RULESETS = chrome.runtime
+  .getManifest()
+  .declarative_net_request.rule_resources.map((r) => r.id);
+const ALLOW_PRIORITY = 100; // must beat every list rule (priorities 1-3)
 
 // ---- state helpers -------------------------------------------------------
 
@@ -15,8 +18,8 @@ async function getState() {
 async function applyGlobalPause(paused) {
   await chrome.declarativeNetRequest.updateEnabledRulesets(
     paused
-      ? { disableRulesetIds: [BASE_RULESET] }
-      : { enableRulesetIds: [BASE_RULESET] }
+      ? { disableRulesetIds: RULESETS }
+      : { enableRulesetIds: RULESETS }
   );
   await chrome.storage.local.set({ pausedEverywhere: paused });
 }

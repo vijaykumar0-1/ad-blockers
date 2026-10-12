@@ -4,9 +4,9 @@ A small, auditable ad blocker for Chrome. Everything runs on your machine. The e
 
 ## How it works
 
-- **Network blocking.** `rules/base.json` is a Chrome `declarativeNetRequest` ruleset. Chrome itself matches every request against it, so blocking happens inside the browser, with no background script inspecting your traffic.
-- **Third-party only.** A rule blocks a domain only when another site loads it, so visiting that domain directly still works.
-- **Pausing.** Pausing on a site adds a local "allow everything" rule for that site. Pausing everywhere turns the ruleset off.
+- **Network blocking.** The `rules/*.json` files are Chrome `declarativeNetRequest` rulesets. Chrome itself matches every request against them, so blocking happens inside the browser, with no extension code inspecting your traffic.
+- **Filter lists.** Besides LocalBlock's own short list (`rules/domains.txt`), the extension ships [EasyList](https://easylist.to/) (ads) and EasyPrivacy (trackers), compiled into rulesets at build time. Updating them is a build step; the extension never downloads anything.
+- **Pausing.** Pausing on a site adds a local "allow everything" rule for that site. Pausing everywhere turns all rulesets off.
 - **Permissions.** `declarativeNetRequest`, `storage` (to remember the global pause) and `activeTab` (to read the current tab's site and blocked count when you open the popup). No host permissions.
 
 ## Install (unpacked)
@@ -15,25 +15,32 @@ A small, auditable ad blocker for Chrome. Everything runs on your machine. The e
 2. Click **Load unpacked** and select this folder.
 3. Pin LocalBlock to the toolbar. The badge shows how many requests were blocked on the current tab.
 
-## Editing the block list
+## Updating the filter lists
 
-Edit `rules/domains.txt` (one domain per line), then run:
+Requires Node.js 20 or later; there are no dependencies to install.
 
 ```sh
-node tools/build-rules.mjs
+npm run update   # download EasyList + EasyPrivacy and rebuild rules/*.json
+npm test         # run the converter tests
 ```
 
-and click the reload icon for LocalBlock on `chrome://extensions`.
+Then click the reload icon for LocalBlock on `chrome://extensions`.
+
+`tools/fetch-lists.mjs` assembles the lists from their sources in [easylist/easylist](https://github.com/easylist/easylist). `tools/abp2dnr.mjs` converts each filter to a Chrome rule. Filters Chrome cannot express faithfully (regex filters, `$popup`, `$csp`, `$redirect` and similar) are skipped rather than approximated, so a converted rule never blocks more than the list intended. The build prints what was skipped and why. Cosmetic (`##`) filters are extracted for the upcoming cosmetic-filtering feature.
+
+To change LocalBlock's own list, edit `rules/domains.txt` and run `npm run build`.
 
 ## Roadmap
 
 - [x] Network blocking of core ad domains, per-site and global pause, blocked count
-- [ ] Compile community filter lists (EasyList, EasyPrivacy) into rulesets
+- [x] Compile EasyList and EasyPrivacy into rulesets
 - [ ] Cosmetic filtering (hide leftover ad boxes)
 - [ ] Scriptlets for sites like YouTube
 - [ ] "Hide something on this page" element picker
-- [ ] Options page and filter-list updates
+- [ ] Options page: choose lists, manage paused sites
 
 ## License
 
-To be decided before reusing community filter lists or scriptlets; GPL-3.0 keeps the most options open.
+LocalBlock is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+
+The bundled rulesets are derived from EasyList and EasyPrivacy, © The EasyList authors, used under GPL-3.0 (see [easylist.to/pages/licence.html](https://easylist.to/pages/licence.html)).

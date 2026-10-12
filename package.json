@@ -1,0 +1,17 @@
+{
+  "name": "localblock",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A small, auditable ad blocker for Chrome that runs entirely on your machine.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "fetch-lists": "node tools/fetch-lists.mjs",
+    "build": "node tools/build-rules.mjs",
+    "update": "node tools/fetch-lists.mjs && node tools/build-rules.mjs",
+    "test": "node --test tools/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
