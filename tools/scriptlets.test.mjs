@@ -185,3 +185,49 @@ test("rpnt rewrites matching inline scripts; untrusted lists cannot use it", () 
   const { stats } = parseScriptletFilters([{ text: "x.com##+js(rpnt, script, a, b)", trusted: false }]);
   assert.equal(stats.skipped["untrusted-source"], 1);
 });
+
+test("rpnt also catches a <script> whose text is added after the element", () => {
+  const script = { nodeName: "SCRIPT", src: "", textContent: "" };
+  const textNode = { nodeType: 3, parentNode: script };
+  let observerCallback;
+  page(
+    "www.youtube.com",
+    "www.youtube.com##+js(rpnt, script, /^if \\(window\\.ytcsi/, patched();$&, sedCount, 1, condition, js_ld)",
+    {
+      MutationObserver: class {
+        constructor(cb) {
+          observerCallback = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+      document: { documentElement: {}, querySelectorAll: () => [] },
+    }
+  );
+  observerCallback([{ addedNodes: [script] }]); // element first, still empty
+  script.textContent = "if (window.ytcsi) { js_ld(); }";
+  observerCallback([{ addedNodes: [textNode] }]); // then its text
+  assert.equal(script.textContent, "patched();if (window.ytcsi) { js_ld(); }");
+});
+
+test("trusted-edit-inbound-object edits a copy of matching JSON.stringify arguments", () => {
+  const ctx = page(
+    "www.youtube.com",
+    [
+      `www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.attestationRequest][?.context.client.userAgent*="channel"].context.client[?.clientName=="WEB"]+={"clientScreen":"CHANNEL"})`,
+      `www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.attestationRequest][?.context.client.userAgent=/adunit|channel/].playbackContext.contentPlaybackContext.referer=repl({"regex":"(?:#reloadxhr)?$"\\,"replacement":"#reloadxhr"}))`,
+    ].join("\n")
+  );
+  const out = vm.runInContext(
+    `const body = { context: { client: { clientName: "WEB", userAgent: "Mozilla/5.0 (Mac; channel)" } },
+       playbackContext: { contentPlaybackContext: { referer: "https://www.youtube.com/watch?v=x" } }, attestationRequest: {} };
+     const s = JSON.stringify(body);
+     JSON.stringify({ sent: JSON.parse(s), original: body, other: JSON.stringify({ a: 1 }) })`,
+    ctx
+  );
+  const { sent, original, other } = JSON.parse(out);
+  assert.equal(sent.context.client.clientScreen, "CHANNEL");
+  assert.equal(sent.playbackContext.contentPlaybackContext.referer, "https://www.youtube.com/watch?v=x#reloadxhr");
+  assert.equal(original.context.client.clientScreen, undefined, "page object untouched");
+  assert.equal(other, '{"a":1}');
+});

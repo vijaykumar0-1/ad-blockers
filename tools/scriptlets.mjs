@@ -366,14 +366,16 @@ export function watchNodes(nodeName, pattern, options, onMatch) {
   const condition = options.condition ? toRe(options.condition, "") : null;
   const excludes = options.excludes ? toRe(options.excludes, "") : null;
   let remaining = Number(options.sedCount) > 0 ? Number(options.sedCount) : Infinity;
+  const done = new WeakSet();
   const check = (node) => {
-    if (remaining <= 0 || node.nodeName !== name) return;
+    if (!node || remaining <= 0 || done.has(node) || node.nodeName !== name) return;
     if (name === "SCRIPT" && node.src) return;
     const text = node.textContent || "";
     re.lastIndex = 0;
     if (!re.test(text)) return;
     if (condition && !condition.test(text)) return;
     if (excludes && excludes.test(text)) return;
+    done.add(node);
     remaining--;
     re.lastIndex = 0;
     onMatch(node, text, re);
@@ -382,7 +384,9 @@ export function watchNodes(nodeName, pattern, options, onMatch) {
   const observer = new MutationObserver((records) => {
     for (const r of records) {
       for (const n of r.addedNodes) {
-        check(n);
+        // The parser may add a <script> before its text: also react when the text arrives.
+        if (n.nodeType === 3) check(n.parentNode);
+        else check(n);
         if (n.querySelectorAll) for (const c of n.querySelectorAll(nodeName)) check(c);
       }
     }
@@ -459,6 +463,209 @@ export function preventDomBypass(methodPath, propPath) {
   });
 }
 
+// ---- trusted-edit-inbound-object -------------------------------------------------------
+// (fnChain, argPos, query): before the page calls fnChain (e.g. JSON.stringify), apply a
+// JSON-path edit to argument argPos. Supports the subset of uBlock Origin's JSON-path syntax
+// its filters use: .prop steps, [?pred] filters (on arrays: keep matching elements; on objects:
+// keep the object if it matches), and the edits "+={json}" (merge), "=json" (assign) and
+// "=repl({regex, replacement})". Predicates: .path (exists), !.path, and .path followed by
+// ==, !=, *=, ^=, $= with a JSON value, or =/regex/. "${now}" in a value becomes Date.now().
+export function makeJsonEditor(query) {
+  let i = 0;
+  const q = String(query || "");
+  const steps = [];
+  const readUntilBracketEnd = () => {
+    let depth = 0;
+    let out = "";
+    let quote = null;
+    for (; i < q.length; i++) {
+      const c = q[i];
+      if (quote) {
+        if (c === "\\") {
+          out += c + q[++i];
+          continue;
+        }
+        if (c === quote) quote = null;
+      } else if (c === '"' || c === "/") {
+        // a regex literal only starts right after "="
+        if (c === '"' || /=$/.test(out)) quote = c;
+      } else if (c === "[") depth++;
+      else if (c === "]") {
+        if (depth === 0) {
+          i++;
+          return out;
+        }
+        depth--;
+      }
+      out += c;
+    }
+    throw new Error("unterminated [");
+  };
+  const parsePath = (text) => text.split(".").filter(Boolean);
+  const parsePredicate = (text) => {
+    let neg = false;
+    let t = text.trim();
+    if (t.startsWith("!")) {
+      neg = true;
+      t = t.slice(1);
+    }
+    if (!t.startsWith(".")) throw new Error("bad predicate");
+    const m = /^((?:\.[\w$-]+)+)\s*(?:(==|!=|\*=|\^=|\$=|=)\s*(.+))?$/s.exec(t);
+    if (!m) throw new Error("bad predicate");
+    const path = parsePath(m[1]);
+    const op = m[2];
+    let test;
+    if (!op) test = (v) => v !== undefined;
+    else if (op === "=") {
+      const r = /^\/(.+)\/([imsu]*)$/s.exec(m[3]);
+      if (!r) throw new Error("bad regex");
+      const re = new RegExp(r[1], r[2]);
+      test = (v) => typeof v === "string" && re.test(v);
+    } else {
+      const want = JSON.parse(m[3]);
+      test = {
+        "==": (v) => v === want,
+        "!=": (v) => v !== want,
+        "*=": (v) => typeof v === "string" && v.includes(want),
+        "^=": (v) => typeof v === "string" && v.startsWith(want),
+        "$=": (v) => typeof v === "string" && v.endsWith(want),
+      }[op];
+    }
+    return (node) => {
+      let v = node;
+      for (const k of path) v = v !== null && typeof v === "object" ? v[k] : undefined;
+      return neg ? !test(v) : test(v);
+    };
+  };
+
+  // steps
+  let opText = null;
+  while (i < q.length) {
+    if (q.startsWith("[?", i)) {
+      i += 2;
+      steps.push({ filter: parsePredicate(readUntilBracketEnd()) });
+    } else if (q.startsWith("..", i)) {
+      throw new Error("recursive paths are not supported");
+    } else if (q[i] === ".") {
+      const m = /^\.([\w$-]+)/.exec(q.slice(i));
+      if (!m) throw new Error("bad step");
+      steps.push({ prop: m[1] });
+      i += m[0].length;
+    } else if (q.startsWith("+=", i) || q[i] === "=") {
+      opText = q.slice(i);
+      break;
+    } else {
+      throw new Error(`unexpected "${q[i]}"`);
+    }
+  }
+  if (!opText) throw new Error("no edit");
+
+  const fillNow = (v) =>
+    typeof v === "string" ? v.replace(/\$\{now\}/g, String(Date.now())) : v;
+  let edit;
+  if (opText.startsWith("+=")) {
+    const patch = JSON.parse(opText.slice(2));
+    if (patch === null || typeof patch !== "object") throw new Error("+= needs an object");
+    // merge into the selected objects
+    edit = { merge: patch };
+  } else {
+    const rhs = opText.slice(1);
+    const repl = /^repl\((.*)\)$/s.exec(rhs);
+    if (repl) {
+      const spec = JSON.parse(repl[1]);
+      const re = new RegExp(spec.regex, spec.flags || "");
+      edit = { replace: (old) => (typeof old === "string" ? old.replace(re, spec.replacement ?? "") : old) };
+    } else {
+      const value = JSON.parse(rhs);
+      edit = { replace: () => fillNow(value) };
+    }
+  }
+  // With "=", the last .prop step names the property to set.
+  let setKey = null;
+  if (edit.replace) {
+    const last = steps[steps.length - 1];
+    if (!last || !last.prop) throw new Error("= needs a property");
+    setKey = steps.pop().prop;
+  }
+
+  const select = (root) => {
+    let nodes = [root];
+    for (const step of steps) {
+      const next = [];
+      for (const n of nodes) {
+        if (n === null || typeof n !== "object") continue;
+        if (step.prop !== undefined) {
+          if (n[step.prop] !== undefined) next.push(n[step.prop]);
+        } else if (Array.isArray(n)) {
+          for (const el of n) if (step.filter(el)) next.push(el);
+        } else if (step.filter(n)) {
+          next.push(n);
+        }
+      }
+      nodes = next;
+      if (!nodes.length) return nodes;
+    }
+    return nodes.filter((n) => n !== null && typeof n === "object");
+  };
+  const apply = (root) => {
+    const nodes = select(root);
+    let changed = false;
+    for (const n of nodes) {
+      if (n === null || typeof n !== "object") continue;
+      if (edit.merge) {
+        Object.assign(n, JSON.parse(JSON.stringify(edit.merge)));
+        changed = true;
+      } else {
+        n[setKey] = edit.replace(n[setKey]);
+        changed = true;
+      }
+    }
+    return changed;
+  };
+  apply.matches = (root) => select(root).length > 0;
+  return apply;
+}
+
+export function editInboundObject(fnChain, argPos, query) {
+  if (!fnChain || !query) return;
+  let editor;
+  try {
+    editor = makeJsonEditor(query);
+  } catch {
+    return; // syntax we do not support: do nothing rather than guess
+  }
+  const pos = Number(argPos) || 0;
+  const parts = fnChain.split(".");
+  const name = parts.pop();
+  let owner = window;
+  for (const p of parts) {
+    owner = owner?.[p];
+    if (!owner) return;
+  }
+  const original = owner[name];
+  if (typeof original !== "function") return;
+  // Edit a copy, so the page's own object stays as it was.
+  const stringify = JSON.stringify;
+  const parse = JSON.parse;
+  const clone = (v) => Reflect.apply(parse, JSON, [Reflect.apply(stringify, JSON, [v])]);
+  owner[name] = new Proxy(original, {
+    apply(target, thisArg, args) {
+      const arg = args[pos];
+      if (arg !== null && typeof arg === "object") {
+        try {
+          if (!editor.matches(arg)) return Reflect.apply(target, thisArg, args);
+          const copy = clone(arg);
+          if (editor(copy)) {
+            args = args.slice();
+            args[pos] = copy;
+          }
+        } catch {}
+      }
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+}
+
 // ---- registry --------------------------------------------------------------------------
 // name in filters -> { fn, helpers the fn needs, trusted: only from uBlock Origin's own lists }
 export const SCRIPTLETS = {
@@ -493,6 +700,7 @@ export const SCRIPTLETS = {
   rmnt: { fn: removeNodeText, helpers: [varargs, watchNodes] },
   "remove-node-text": { fn: removeNodeText, helpers: [varargs, watchNodes] },
   "trusted-prevent-dom-bypass": { fn: preventDomBypass, helpers: [], trusted: true },
+  "trusted-edit-inbound-object": { fn: editInboundObject, helpers: [makeJsonEditor], trusted: true },
 };
 
 export { makeJsonPruner };

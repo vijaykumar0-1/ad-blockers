@@ -31,14 +31,16 @@ function watchNodes(nodeName, pattern, options, onMatch) {
   const condition = options.condition ? toRe(options.condition, "") : null;
   const excludes = options.excludes ? toRe(options.excludes, "") : null;
   let remaining = Number(options.sedCount) > 0 ? Number(options.sedCount) : Infinity;
+  const done = new WeakSet();
   const check = (node) => {
-    if (remaining <= 0 || node.nodeName !== name) return;
+    if (!node || remaining <= 0 || done.has(node) || node.nodeName !== name) return;
     if (name === "SCRIPT" && node.src) return;
     const text = node.textContent || "";
     re.lastIndex = 0;
     if (!re.test(text)) return;
     if (condition && !condition.test(text)) return;
     if (excludes && excludes.test(text)) return;
+    done.add(node);
     remaining--;
     re.lastIndex = 0;
     onMatch(node, text, re);
@@ -47,7 +49,9 @@ function watchNodes(nodeName, pattern, options, onMatch) {
   const observer = new MutationObserver((records) => {
     for (const r of records) {
       for (const n of r.addedNodes) {
-        check(n);
+        // The parser may add a <script> before its text: also react when the text arrives.
+        if (n.nodeType === 3) check(n.parentNode);
+        else check(n);
         if (n.querySelectorAll) for (const c of n.querySelectorAll(nodeName)) check(c);
       }
     }

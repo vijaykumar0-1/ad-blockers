@@ -1,5 +1,13 @@
 [
  {
+  "id": "editInboundObject",
+  "file": "rules/scriptlets/editInboundObject.js",
+  "hosts": [
+   "dobreprogramy.pl",
+   "www.youtube.com"
+  ]
+ },
+ {
   "id": "jsonPrune",
   "file": "rules/scriptlets/jsonPrune.js",
   "hosts": [
