@@ -5,15 +5,17 @@
 //   rules/easyprivacy.json  from lists/easyprivacy.txt
 //
 //   rules/cosmetic.json     element-hiding (##) filters from both lists
+//   rules/scriptlets/       +js() scriptlet filters, mainly from uBlock Origin's lists
 //
 // Usage: node tools/build-rules.mjs
 // No dependencies, no network access.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertList, validateRule } from "./abp2dnr.mjs";
 import { compileCosmetic } from "./cosmetic.mjs";
+import { generateFile, hostsFor, parseScriptletFilters } from "./scriptlet-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -103,6 +105,35 @@ function main() {
         `${Object.keys(data.specific).length} sites with specific selectors, ` +
         `${Object.keys(data.exceptions).length} sites with exceptions; skipped ${JSON.stringify(stats.skipped)}`
     );
+  }
+
+  const uboPath = join(root, "lists", "ubo.txt");
+  if (existsSync(uboPath)) {
+    // trusted-* scriptlets rewrite page code, so only uBlock Origin's own lists may use them.
+    const sources = [
+      { text: readFileSync(uboPath, "utf8"), trusted: true },
+      ...listTexts.map((text) => ({ text, trusted: false })),
+    ];
+    const { byName, disableAll, stats } = parseScriptletFilters(sources);
+    const dir = join(root, "rules", "scriptlets");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const index = [];
+    for (const [name, group] of Object.entries(byName).sort()) {
+      const file = `rules/scriptlets/${name}.js`;
+      writeFileSync(join(root, file), generateFile(group, disableAll));
+      index.push({ id: name, file, hosts: hostsFor(group) });
+    }
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index, null, 1) + "\n");
+    const unsupported = Object.entries(stats.skipped).filter(([k]) => k.startsWith("unsupported:"));
+    const otherSkips = Object.entries(stats.skipped).filter(([k]) => !k.startsWith("unsupported:"));
+    console.log(
+      `scriptlets   ${stats.used} filters for ${index.map((i) => `${i.id} (${i.hosts.length} sites)`).join(", ")}; ` +
+        `${unsupported.reduce((a, [, v]) => a + v, 0)} use scriptlets not implemented yet; ` +
+        `skipped ${JSON.stringify(Object.fromEntries(otherSkips))}`
+    );
+  } else {
+    console.log("scriptlets   skipped (run: node tools/fetch-lists.mjs)");
   }
 
   console.log(`network      ${total} rules (Chrome guarantees ${GUARANTEED_STATIC_RULES})`);

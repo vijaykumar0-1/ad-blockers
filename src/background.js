@@ -144,6 +144,52 @@ async function injectCss(sender, selectors) {
     .catch(() => undefined); // the frame may already be gone
 }
 
+// ---- scriptlets ------------------------------------------------------------
+// Each file in rules/scriptlets/ is registered to run inside pages (MAIN world, before the
+// page's own scripts) on the sites that have filters for it, minus paused sites.
+
+const SCRIPTLET_PREFIX = "scriptlet-";
+
+function sitePatterns(host) {
+  return [`*://${host}/*`, `*://*.${host}/*`];
+}
+
+let syncing = Promise.resolve();
+function syncScriptlets() {
+  syncing = syncing.then(doSyncScriptlets).catch((err) => console.warn("LocalBlock scriptlets:", err));
+  return syncing;
+}
+
+async function doSyncScriptlets() {
+  const registered = await chrome.scripting.getRegisteredContentScripts();
+  const ours = registered.filter((s) => s.id.startsWith(SCRIPTLET_PREFIX)).map((s) => s.id);
+  if (ours.length) await chrome.scripting.unregisterContentScripts({ ids: ours });
+
+  const pause = await pauseState();
+  if (pause.everywhere) return;
+  const index = await fetch(chrome.runtime.getURL("rules/scriptlets/index.json")).then((r) => r.json());
+  const excludeMatches = [...pause.sites].flatMap(sitePatterns);
+  for (const { id, file, hosts } of index) {
+    try {
+      await chrome.scripting.registerContentScripts([
+        {
+          id: SCRIPTLET_PREFIX + id,
+          js: [file],
+          matches: hosts.flatMap(sitePatterns),
+          ...(excludeMatches.length ? { excludeMatches } : {}),
+          runAt: "document_start",
+          world: "MAIN",
+          allFrames: true,
+          matchOriginAsFallback: true,
+          persistAcrossSessions: true,
+        },
+      ]);
+    } catch (err) {
+      console.warn(`LocalBlock: could not register ${file}:`, err);
+    }
+  }
+}
+
 // ---- lifecycle -----------------------------------------------------------
 
 async function init() {
@@ -155,6 +201,7 @@ async function init() {
   // Enabled rulesets reset when the extension updates, so re-apply the saved state.
   const { pausedEverywhere } = await getState();
   await applyGlobalPause(pausedEverywhere);
+  await syncScriptlets();
 }
 
 chrome.runtime.onInstalled.addListener(init);
@@ -172,10 +219,13 @@ const handlers = {
   },
   async setSitePaused({ host, paused }) {
     await setSitePaused(host, paused);
+    await syncScriptlets();
     return handlers.getStatus({ host });
   },
   async setPausedEverywhere({ paused, host }) {
     await applyGlobalPause(paused);
+    pauseCache = null;
+    await syncScriptlets();
     return handlers.getStatus({ host });
   },
   async listPausedSites() {
