@@ -3,3 +3,6 @@ lists/
 node_modules/
 *.zip
 .DS_Store
+dist/
+safari/xcode/
+safari/build/

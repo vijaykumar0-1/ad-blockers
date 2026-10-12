@@ -236,16 +236,28 @@ async function doSyncScriptlets() {
 
 // ---- lifecycle -----------------------------------------------------------
 
+// Each step is independent, so a browser that lacks one API (Safari ignores badge colours,
+// for example) still gets the rest.
+async function tryStep(name, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    console.warn(`LocalBlock: ${name} unavailable:`, err);
+  }
+}
+
 async function init() {
-  // Show how many requests were blocked on each tab, counted by Chrome itself.
-  await chrome.declarativeNetRequest.setExtensionActionOptions({
-    displayActionCountAsBadgeText: true,
-  });
-  await chrome.action.setBadgeBackgroundColor({ color: "#3a3a3a" });
+  // Show how many requests were blocked on each tab, counted by the browser itself.
+  await tryStep("badge count", () =>
+    chrome.declarativeNetRequest.setExtensionActionOptions({ displayActionCountAsBadgeText: true })
+  );
+  await tryStep("badge colour", () => chrome.action.setBadgeBackgroundColor({ color: "#3a3a3a" }));
   // Enabled rulesets reset when the extension updates, so re-apply the saved state.
-  const { pausedEverywhere } = await getState();
-  await applyGlobalPause(pausedEverywhere);
-  await syncScriptlets();
+  await tryStep("pause state", async () => {
+    const { pausedEverywhere } = await getState();
+    await applyGlobalPause(pausedEverywhere);
+  });
+  await tryStep("scriptlets", () => syncScriptlets());
 }
 
 chrome.runtime.onInstalled.addListener(init);

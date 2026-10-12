@@ -9,7 +9,8 @@
     "fetch-lists": "node tools/fetch-lists.mjs",
     "build": "node tools/build-rules.mjs",
     "update": "node tools/fetch-lists.mjs && node tools/build-rules.mjs",
-    "test": "node --test tools/*.test.mjs"
+    "test": "node --test tools/*.test.mjs",
+    "safari": "bash safari/build.sh"
   },
   "engines": {
     "node": ">=20"

@@ -18,6 +18,20 @@ A small, auditable ad blocker for Chrome. Everything runs on your machine. The e
 2. Click **Load unpacked** and select this folder.
 3. Pin LocalBlock to the toolbar. The badge shows how many requests were blocked on the current tab.
 
+## Install in Safari (Mac)
+
+Needs macOS with Safari 26 or later, [Xcode](https://apps.apple.com/app/xcode/id497799835) (the full app; it includes Apple's extension converter) and Node.js 20+.
+
+```sh
+npm run safari   # same as: bash safari/build.sh
+```
+
+This bundles the extension for Safari (`tools/build-safari.mjs` → `dist/safari`), wraps it in a small Mac app with Apple's `safari-web-extension-converter`, builds it with Xcode and opens it. Then:
+
+1. Safari > Settings > Advanced: tick **Show features for web developers**.
+2. Safari > Settings > Developer: tick **Allow unsigned extensions**. Safari clears this each time it quits, because the app is built on your Mac rather than signed by a paid Apple developer account.
+3. Safari > Settings > Extensions: tick **LocalBlock** and choose **Always Allow on Every Website**.
+
 ## Updating the filter lists
 
 Requires Node.js 20 or later; there are no dependencies to install.
@@ -45,7 +59,8 @@ To change LocalBlock's own list, edit `rules/domains.txt` and run `npm run build
 - [x] Scriptlets for sites like YouTube (core set)
 - [x] Popup and click-redirect protection
 - [ ] Entity filters (`site.*`) for scriptlets
-- [ ] Safari build
+- [x] Safari build (Mac)
+- [ ] Safari on iPhone and iPad
 - [ ] "Hide something on this page" element picker
 - [ ] Options page: choose lists, manage paused sites
 
