@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { convertList, validateRule } from "./abp2dnr.mjs";
 import { compileCosmetic } from "./cosmetic.mjs";
 import { compilePopups } from "./popup.mjs";
-import { generateFile, hasEntities, hostsFor, parseScriptletFilters } from "./scriptlet-build.mjs";
+import { generateFile, hasEntities, hostsFor, parseScriptletFilters, preparse } from "./scriptlet-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -98,14 +98,20 @@ function main() {
     );
   }
 
+  const uboCosmeticPath = join(root, "lists", "ubo.txt");
   if (listTexts.length) {
-    const { data, stats } = compileCosmetic(listTexts);
+    // uBlock's own list carries many site-specific fixes; keep only its blocks meant for MV3 Chromium.
+    const cosmeticSources = existsSync(uboCosmeticPath)
+      ? [...listTexts, preparse(readFileSync(uboCosmeticPath, "utf8"))]
+      : listTexts;
+    const { data, stats } = compileCosmetic(cosmeticSources);
     writeFileSync(join(root, "rules", "cosmetic.json"), JSON.stringify(data));
     const keyed = Object.values(data.generic.keyed).reduce((a, b) => a + b.length, 0);
     console.log(
       `cosmetic     ${keyed} keyed + ${data.generic.unkeyed.length} always-on generic selectors, ` +
         `${Object.keys(data.specific).length} sites with specific selectors, ` +
-        `${Object.keys(data.exceptions).length} sites with exceptions; skipped ${JSON.stringify(stats.skipped)}`
+        `${Object.keys(data.exceptions).length} sites with exceptions, ${Object.keys(data.procedural).length} sites with ` +
+        `procedural fixes; skipped ${JSON.stringify(stats.skipped)}`
     );
   }
 

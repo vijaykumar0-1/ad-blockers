@@ -16,6 +16,28 @@ const SEPARATOR = /^(.*?)(#@?#|#@?\?#|#@?\$#|#@?%#|#@?\$\?#)(.+)$/;
 // Selector extensions that are not CSS. Filters using them need JavaScript and are skipped.
 const PROCEDURAL = /:(-abp-[a-z-]+|has-text|contains|xpath|upward|remove|remove-attr|remove-class|style|matches-attr|matches-css(-before|-after)?|matches-media|matches-path|matches-prop|min-text-length|watch-attr|others|if|if-not|nth-ancestor|shadow)\(|:remove\(\)/;
 
+// The procedural operators LocalBlock supports, on site-specific filters only:
+//   sel:style(declarations)          -> CSS
+//   sel:remove-attr(name)            -> remove an attribute (e.g. unlock a disabled button)
+//   sel:remove-class(name)           -> remove a class
+//   sel:watch-attr(attrs):remove-... -> the same, re-applied whenever the page sets them again
+// Names may be "a|b" or a /regex/.
+export function parseAction(selector) {
+  const style = /^(.+?):style\((.+)\)$/s.exec(selector);
+  if (style) {
+    const [, sel, decls] = style;
+    if (PROCEDURAL.test(sel) || /url\(|[{}\\]|@import|expression/i.test(decls)) return null;
+    return { t: "style", s: sel, a: decls.trim() };
+  }
+  const rm = /^(.+?)(?::watch-attr\(([^)]*)\))?:(remove-attr|remove-class)\((.+)\)$/s.exec(selector);
+  if (rm) {
+    const [, sel, watch, op, arg] = rm;
+    if (PROCEDURAL.test(sel) || !arg.trim()) return null;
+    return { t: op, s: sel, a: arg.trim(), ...(watch !== undefined ? { w: watch.trim() || "*" } : {}) };
+  }
+  return null;
+}
+
 const DOMAIN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.\*)?$/;
 
 /** Returns ".class" or "#id" if every match of sel must carry that class/id, else null. */
@@ -50,6 +72,7 @@ export function compileCosmetic(listTexts) {
   const exceptions = {};
   const genericHide = new Set();
   const elemHide = new Set();
+  const procedural = {};
   const stats = { generic: 0, specific: 0, exceptions: 0, skipped: {} };
   const skip = (why) => (stats.skipped[why] = (stats.skipped[why] || 0) + 1);
 
@@ -85,7 +108,14 @@ export function compileCosmetic(listTexts) {
         continue;
       }
       if (PROCEDURAL.test(selector)) {
-        skip("procedural");
+        const action = !isException && parseAction(selector);
+        const actDomains = action && parseDomains(domainText);
+        if (action && actDomains && actDomains.include.length) {
+          for (const d of actDomains.include) push(procedural, d, action);
+          stats.procedural = (stats.procedural || 0) + 1;
+        } else {
+          skip("procedural");
+        }
         continue;
       }
       if (/[{}]/.test(selector) || /[^\x20-\x7e]/.test(selector)) {
@@ -140,6 +170,9 @@ export function compileCosmetic(listTexts) {
       exceptions: dedupe(exceptions),
       genericHide: [...genericHide].sort(),
       elemHide: [...elemHide].sort(),
+      procedural: Object.fromEntries(
+        Object.entries(procedural).map(([h, list]) => [h, [...new Map(list.map((a) => [JSON.stringify(a), a])).values()]])
+      ),
     },
     stats,
   };

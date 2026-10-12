@@ -134,14 +134,14 @@ async function planFor(sender) {
   return plan;
 }
 
-async function injectCss(sender, selectors) {
-  if (!selectors.length) return;
+async function injectCss(sender, selectors, styles = []) {
+  if (!selectors.length && !styles.length) return;
   const target = sender.documentId
     ? { tabId: sender.tab.id, documentIds: [sender.documentId] }
     : { tabId: sender.tab.id, frameIds: [sender.frameId] };
   // USER-origin CSS outranks the page's own !important styles and is invisible to the page.
   await chrome.scripting
-    .insertCSS({ target, css: toCss(selectors), origin: "USER" })
+    .insertCSS({ target, css: [toCss(selectors), ...styles].filter(Boolean).join("\n"), origin: "USER" })
     .catch(() => undefined); // the frame may already be gone
 }
 
@@ -295,8 +295,8 @@ const contentHandlers = {
   async "cosmetic:page"(msg, sender) {
     const plan = await planFor(sender);
     if (!plan) return { active: false };
-    await injectCss(sender, plan.selectors);
-    return { active: plan.generic };
+    await injectCss(sender, plan.selectors, plan.styles);
+    return { active: plan.generic, actions: plan.actions };
   },
   async "cosmetic:tokens"(msg, sender) {
     const plan = await planFor(sender);

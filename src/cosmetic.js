@@ -62,10 +62,53 @@
     if (document.documentElement) scan(document.documentElement);
   }
 
+  // Site fixes such as ":remove-attr(disabled)" that unlock a player an ad step had locked.
+  // They are re-applied whenever the page changes, since sites often set them again.
+  function runActions(actions) {
+    const pick = (spec, names) => {
+      const m = /^\/(.+)\/([imsu]*)$/.exec(spec);
+      if (m) {
+        const re = new RegExp(m[1], m[2]);
+        return names.filter((n) => re.test(n));
+      }
+      return spec.split("|").map((n) => n.trim()).filter(Boolean);
+    };
+    const apply = () => {
+      for (const a of actions) {
+        let elements;
+        try {
+          elements = document.querySelectorAll(a.s);
+        } catch {
+          continue; // a selector this browser doesn't understand
+        }
+        for (const el of elements) {
+          if (a.t === "remove-attr") {
+            for (const n of pick(a.a, el.getAttributeNames())) if (el.hasAttribute(n)) el.removeAttribute(n);
+          } else if (a.t === "remove-class") {
+            for (const c of pick(a.a, [...el.classList])) if (el.classList.contains(c)) el.classList.remove(c);
+          }
+        }
+      }
+    };
+    let queued = false;
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      setTimeout(() => {
+        queued = false;
+        apply();
+      }, 0);
+    };
+    new MutationObserver(schedule).observe(document, { childList: true, subtree: true, attributes: true });
+    apply();
+  }
+
   start();
   send({ type: "cosmetic:page" }).then((res) => {
-    // Paused site, or hiding disabled for this site by the filter lists: stop watching.
-    if (res && res.ok && res.result && res.result.active === false) {
+    const result = res && res.ok ? res.result : null;
+    if (result && Array.isArray(result.actions) && result.actions.length) runActions(result.actions);
+    // Paused site, or generic hiding disabled for this site by the filter lists: stop watching.
+    if (result && result.active === false) {
       active = false;
       observer?.disconnect();
       pending = [];

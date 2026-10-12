@@ -71,3 +71,94 @@ test("host candidates and css", () => {
   assert.ok(hostCandidates("example.co.uk").includes("example.*"));
   assert.equal(toCss([".a", "#b"]), ".a{display:none!important}\n#b{display:none!important}");
 });
+
+import { parseAction } from "./cosmetic.mjs";
+import vm from "node:vm";
+import { readFileSync } from "node:fs";
+
+test("procedural operators: :style, :remove-attr, :remove-class, :watch-attr", () => {
+  assert.deepEqual(parseAction('div[id="pi-step-play"]:style(display:block !important)'), {
+    t: "style",
+    s: 'div[id="pi-step-play"]',
+    a: "display:block !important",
+  });
+  assert.deepEqual(parseAction(".pi-btn--play.pi-btn:remove-attr(disabled)"), {
+    t: "remove-attr",
+    s: ".pi-btn--play.pi-btn",
+    a: "disabled",
+  });
+  assert.deepEqual(parseAction(".pi-btn--play.pi-btn:watch-attr(disabled):remove-class(is-locked)"), {
+    t: "remove-class",
+    s: ".pi-btn--play.pi-btn",
+    a: "is-locked",
+    w: "disabled",
+  });
+  assert.equal(parseAction("div:style(background:url(https://evil.example/x))"), null, "no url() in styles");
+  assert.equal(parseAction("div:has-text(Ad):remove-attr(x)"), null, "selector must be plain CSS");
+
+  const { data } = compileCosmetic([
+    [
+      "hianime.ms###pi-step-ad",
+      'hianime.ms##div[id="pi-step-play"]:style(display:block !important)',
+      "hianime.ms##.pi-btn--play.pi-btn:remove-attr(disabled)",
+      "hianime.ms##.pi-btn--play.pi-btn:watch-attr(disabled):remove-class(is-locked)",
+      "##.generic:remove-attr(x)", // generic procedural filters are not supported
+    ].join("\n"),
+  ]);
+  const plan = pagePlan(data, "hianime.ms");
+  assert.ok(plan.selectors.includes("#pi-step-ad"));
+  assert.deepEqual(plan.styles, ['div[id="pi-step-play"]{display:block !important}']);
+  assert.equal(plan.actions.length, 2);
+  assert.deepEqual(pagePlan(data, "other.example").actions, []);
+});
+
+test("content script unlocks the player and keeps it unlocked", async () => {
+  // A tiny fake DOM: one play button the site keeps locking.
+  const button = {
+    attrs: new Map([["disabled", ""], ["class", "pi-btn pi-btn--play is-locked"]]),
+    classSet: new Set(["pi-btn", "pi-btn--play", "is-locked"]),
+    getAttributeNames() { return [...this.attrs.keys()]; },
+    hasAttribute(n) { return this.attrs.has(n); },
+    removeAttribute(n) { this.attrs.delete(n); },
+    get classList() {
+      const set = this.classSet;
+      return { [Symbol.iterator]: () => set.values(), contains: (c) => set.has(c), remove: (c) => set.delete(c), length: set.size };
+    },
+  };
+  const observers = [];
+  const actions = [
+    { t: "remove-attr", s: ".pi-btn--play.pi-btn", a: "disabled" },
+    { t: "remove-class", s: ".pi-btn--play.pi-btn", a: "is-locked", w: "disabled" },
+  ];
+  const ctx = {
+    globalThis: {},
+    setTimeout: (fn) => Promise.resolve().then(fn),
+    MutationObserver: class {
+      constructor(cb) { this.cb = cb; observers.push(this); }
+      observe() {}
+      disconnect() {}
+    },
+    document: {
+      documentElement: { nodeType: 1, querySelectorAll: () => [] },
+      querySelectorAll: (sel) => (sel === ".pi-btn--play.pi-btn" ? [button] : []),
+    },
+    chrome: {
+      runtime: {
+        sendMessage: async (msg) => (msg.type === "cosmetic:page" ? { ok: true, result: { active: true, actions } } : { ok: true }),
+      },
+    },
+  };
+  ctx.globalThis = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL("../src/cosmetic.js", import.meta.url), "utf8"), ctx);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(button.hasAttribute("disabled"), false, "unlocked");
+  assert.equal(button.classSet.has("is-locked"), false);
+  // The site locks it again; the watcher undoes it.
+  button.attrs.set("disabled", "");
+  button.classSet.add("is-locked");
+  observers.at(-1).cb([]);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(button.hasAttribute("disabled"), false, "re-unlocked");
+  assert.equal(button.classSet.has("is-locked"), false);
+});

@@ -38,7 +38,16 @@ export function pagePlan(data, host) {
   const selectors = [...specific, ...(generic ? data.generic.unkeyed : [])].filter(
     (s) => !exceptions.has(s)
   );
-  return { selectors: [...new Set(selectors)], exceptions, generic };
+  // Site-specific procedural filters: :style() becomes CSS, the rest run in the content script.
+  const styles = [];
+  const actions = [];
+  for (const c of candidates) {
+    for (const a of (data.procedural && data.procedural[c]) || []) {
+      if (a.t === "style") styles.push(`${a.s}{${a.a}}`);
+      else actions.push(a);
+    }
+  }
+  return { selectors: [...new Set(selectors)], exceptions, generic, styles, actions };
 }
 
 /** Generic selectors unlocked by classes/ids seen on the page ("." + class, "#" + id). */
