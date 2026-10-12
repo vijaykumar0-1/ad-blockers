@@ -71,7 +71,25 @@ function setConstant(chain, rawValue) {
       return;
     }
     const desc = Object.getOwnPropertyDescriptor(owner, prop);
-    if (desc && (desc.get || desc.configurable === false)) return;
+    if (desc && desc.configurable === false) return;
+    if (desc && desc.get) {
+      // Already trapped (e.g. by another set filter on the same object): chain onto it.
+      const oldGet = desc.get;
+      const oldSet = desc.set;
+      try {
+        Object.defineProperty(owner, prop, {
+          configurable: true,
+          enumerable: desc.enumerable,
+          get: oldGet,
+          set(v) {
+            if (oldSet) oldSet.call(this, v);
+            const cur = oldGet.call(this);
+            if (cur !== null && (typeof cur === "object" || typeof cur === "function")) trapChain(cur, rest);
+          },
+        });
+      } catch {}
+      return;
+    }
     try {
       Object.defineProperty(owner, prop, {
         configurable: true,

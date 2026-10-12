@@ -326,8 +326,141 @@ export function replaceXhrResponse(pattern, replacement, propsToMatch) {
   hookXhr(makeRequestMatcher(propsToMatch), makeReplacer(pattern, replacement));
 }
 
+
+// ---- nano-stb (nano-setTimeout-booster) ------------------------------------------------
+// (needle, delay, boost): timers whose callback matches needle and whose delay equals delay
+// ("*" for any) run with delay * boost. YouTube waits ~17s before playing when ads are gone.
+export function nanoSetTimeoutBooster(needle, delay, boost) {
+  const wantDelay = delay === undefined || delay === "" ? 1000 : delay === "*" ? null : Number(delay);
+  let factor = boost === undefined || boost === "" ? 0.05 : Number(boost);
+  if (!Number.isFinite(factor)) return;
+  factor = Math.min(50, Math.max(0.001, factor));
+  const toRe = (s) => {
+    const m = /^\/(.+)\/([gimsu]*)$/.exec(s || "");
+    return m ? new RegExp(m[1], m[2].replace("g", "")) : new RegExp((s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  };
+  const re = toRe(needle);
+  window.setTimeout = new Proxy(window.setTimeout, {
+    apply(target, thisArg, args) {
+      const [callback, ms] = args;
+      if ((wantDelay === null || Number(ms) === wantDelay) && re.test(String(callback))) {
+        args[1] = Number(ms) * factor;
+      }
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+}
+
+// ---- rpnt / rmnt (replace-node-text / remove-node-text) -------------------------------------
+// Watches for <script> (or other) nodes as the page is parsed and rewrites or removes their
+// text before it runs. Options: condition (text must match), excludes (skip if matches),
+// sedCount (stop after this many nodes).
+export function watchNodes(nodeName, pattern, options, onMatch) {
+  const toRe = (s, flags) => {
+    const m = /^\/(.+)\/([gimsu]*)$/.exec(s || "");
+    if (m) return new RegExp(m[1], m[2]);
+    return new RegExp((s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+  };
+  const name = String(nodeName || "").toUpperCase();
+  const re = toRe(pattern, "");
+  const condition = options.condition ? toRe(options.condition, "") : null;
+  const excludes = options.excludes ? toRe(options.excludes, "") : null;
+  let remaining = Number(options.sedCount) > 0 ? Number(options.sedCount) : Infinity;
+  const check = (node) => {
+    if (remaining <= 0 || node.nodeName !== name) return;
+    if (name === "SCRIPT" && node.src) return;
+    const text = node.textContent || "";
+    re.lastIndex = 0;
+    if (!re.test(text)) return;
+    if (condition && !condition.test(text)) return;
+    if (excludes && excludes.test(text)) return;
+    remaining--;
+    re.lastIndex = 0;
+    onMatch(node, text, re);
+    if (remaining <= 0) observer.disconnect();
+  };
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of r.addedNodes) {
+        check(n);
+        if (n.querySelectorAll) for (const c of n.querySelectorAll(nodeName)) check(c);
+      }
+    }
+  });
+  observer.observe(document, { childList: true, subtree: true });
+  if (document.documentElement) for (const n of document.querySelectorAll(nodeName)) check(n);
+}
+
+export function replaceNodeText(nodeName, pattern, replacement, ...rest) {
+  if (!nodeName || !pattern) return;
+  watchNodes(nodeName, pattern, varargs(rest), (node, text, re) => {
+    node.textContent = text.replace(re, replacement || "");
+  });
+}
+
+export function removeNodeText(nodeName, pattern, ...rest) {
+  if (!nodeName || !pattern) return;
+  watchNodes(nodeName, pattern, varargs(rest), (node) => {
+    if (node.nodeName === "SCRIPT") node.remove();
+    else node.textContent = "";
+  });
+}
+
+// ---- trusted-prevent-dom-bypass --------------------------------------------------------------
+// (method, property): pages can append a blank iframe and borrow its untouched fetch or
+// JSON.parse to get around scriptlets. After method (e.g. Node.prototype.appendChild) adds
+// an iframe, give the iframe this page's version of property instead.
+export function preventDomBypass(methodPath, propPath) {
+  if (!methodPath) return;
+  const parts = methodPath.split(".");
+  const method = parts.pop();
+  let owner = window;
+  for (const p of parts) {
+    owner = owner?.[p];
+    if (!owner) return;
+  }
+  if (typeof owner[method] !== "function") return;
+  const copyInto = (win) => {
+    if (!propPath) return;
+    const chain = propPath.split(".");
+    const last = chain.pop();
+    let src = window;
+    let dst = win;
+    for (const p of chain) {
+      src = src?.[p];
+      dst = dst?.[p];
+    }
+    if (src && dst && src[last] !== undefined) {
+      try {
+        Object.defineProperty(dst, last, { value: src[last], configurable: true, writable: true });
+      } catch {}
+    }
+  };
+  owner[method] = new Proxy(owner[method], {
+    apply(target, thisArg, args) {
+      const result = Reflect.apply(target, thisArg, args);
+      try {
+        const node = args[0];
+        const frames =
+          node && node.nodeName === "IFRAME" ? [node] : node && node.querySelectorAll ? node.querySelectorAll("iframe") : [];
+        for (const f of frames) {
+          let win = null;
+          try {
+            win = f.contentWindow;
+            void win.location.href; // throws for cross-origin frames
+          } catch {
+            win = null;
+          }
+          if (win) copyInto(win);
+        }
+      } catch {}
+      return result;
+    },
+  });
+}
+
 // ---- registry --------------------------------------------------------------------------
-// name in filters -> { fn, helpers the fn needs }
+// name in filters -> { fn, helpers the fn needs, trusted: only from uBlock Origin's own lists }
 export const SCRIPTLETS = {
   set: { fn: setConstant, helpers: [] },
   "set-constant": { fn: setConstant, helpers: [] },
@@ -343,12 +476,23 @@ export const SCRIPTLETS = {
   "trusted-replace-fetch-response": {
     fn: replaceFetchResponse,
     helpers: [makeRequestMatcher, makeReplacer, hookFetch],
+    trusted: true,
   },
-  "trusted-rpfr": { fn: replaceFetchResponse, helpers: [makeRequestMatcher, makeReplacer, hookFetch] },
+  "trusted-rpfr": { fn: replaceFetchResponse, helpers: [makeRequestMatcher, makeReplacer, hookFetch], trusted: true },
   "trusted-replace-xhr-response": {
     fn: replaceXhrResponse,
     helpers: [makeRequestMatcher, makeReplacer, hookXhr],
+    trusted: true,
   },
+  "nano-stb": { fn: nanoSetTimeoutBooster, helpers: [] },
+  "nano-setTimeout-booster": { fn: nanoSetTimeoutBooster, helpers: [] },
+  // Rewriting a page's own scripts is powerful, so like uBlock Origin we only take it from trusted lists.
+  rpnt: { fn: replaceNodeText, helpers: [varargs, watchNodes], trusted: true },
+  "replace-node-text": { fn: replaceNodeText, helpers: [varargs, watchNodes], trusted: true },
+  "trusted-rpnt": { fn: replaceNodeText, helpers: [varargs, watchNodes], trusted: true },
+  rmnt: { fn: removeNodeText, helpers: [varargs, watchNodes] },
+  "remove-node-text": { fn: removeNodeText, helpers: [varargs, watchNodes] },
+  "trusted-prevent-dom-bypass": { fn: preventDomBypass, helpers: [], trusted: true },
 };
 
 export { makeJsonPruner };

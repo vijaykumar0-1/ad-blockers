@@ -132,3 +132,56 @@ test("exceptions and untrusted sources", () => {
   ]);
   assert.equal(stats.skipped["untrusted-source"], 1);
 });
+
+test("nano-stb shortens YouTube's ad wait timer only", () => {
+  const calls = [];
+  const ctx = page("www.youtube.com", "www.youtube.com##+js(nano-stb, [native code], 17000, 0.001)", {
+    setTimeout: (cb, ms) => calls.push(ms),
+  });
+  vm.runInContext("setTimeout(function(){}.bind(null), 17000); setTimeout(() => 1, 17000); setTimeout(function(){}.bind(null), 500)", ctx);
+  assert.deepEqual(calls, [17, 17000, 500]);
+});
+
+test("trusted-prevent-dom-bypass gives appended iframes this page's fetch", () => {
+  const frameWin = { location: { href: "about:blank" }, fetch: "pristine", JSON: { parse: "pristine" } };
+  const iframe = { nodeName: "IFRAME", contentWindow: frameWin };
+  const Node = function () {};
+  Node.prototype.appendChild = (n) => n;
+  const ctx = page(
+    "www.youtube.com",
+    [
+      "www.youtube.com##+js(trusted-prevent-dom-bypass, Node.prototype.appendChild, fetch)",
+      "www.youtube.com##+js(trusted-prevent-dom-bypass, Node.prototype.appendChild, JSON.parse)",
+    ].join("\n"),
+    { Node, fetch: "hooked" }
+  );
+  vm.runInContext("JSON.parse = 'hookedParse'", ctx);
+  ctx.Node.prototype.appendChild.call({}, iframe);
+  assert.equal(frameWin.fetch, "hooked");
+  assert.equal(frameWin.JSON.parse, "hookedParse");
+});
+
+test("rpnt rewrites matching inline scripts; untrusted lists cannot use it", () => {
+  const script = { nodeName: "SCRIPT", src: "", textContent: "if (window.ytcsi) { start(); }" };
+  let observerCallback;
+  const ctx = page(
+    "www.youtube.com",
+    "www.youtube.com##+js(rpnt, script, /^if \\(window\\.ytcsi/, patched();$&, sedCount, 1)",
+    {
+      MutationObserver: class {
+        constructor(cb) {
+          observerCallback = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+      document: { documentElement: {}, querySelectorAll: () => [] },
+    }
+  );
+  observerCallback([{ addedNodes: [script] }]);
+  assert.equal(script.textContent, "patched();if (window.ytcsi) { start(); }");
+  assert.ok(ctx);
+
+  const { stats } = parseScriptletFilters([{ text: "x.com##+js(rpnt, script, a, b)", trusted: false }]);
+  assert.equal(stats.skipped["untrusted-source"], 1);
+});

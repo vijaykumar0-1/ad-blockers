@@ -115,7 +115,7 @@ export function parseScriptletFilters(sources) {
         skip(`unsupported:${name}`);
         continue;
       }
-      if (name.startsWith("trusted-") && !trusted) {
+      if ((entry.trusted || name.startsWith("trusted-")) && !trusted) {
         skip("untrusted-source");
         continue;
       }
