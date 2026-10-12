@@ -231,3 +231,29 @@ test("trusted-edit-inbound-object edits a copy of matching JSON.stringify argume
   assert.equal(original.context.client.clientScreen, undefined, "page object untouched");
   assert.equal(other, '{"a":1}');
 });
+
+test("rpnt writes script text through a Trusted Types policy when the site requires it", () => {
+  const script = { nodeName: "SCRIPT", src: "", textContent: "if (window.ytcsi) { js_ld(); }" };
+  let observerCallback;
+  const created = [];
+  page(
+    "www.youtube.com",
+    "www.youtube.com##+js(rpnt, script, /^if \\(window\\.ytcsi/, patched();$&, sedCount, 1)",
+    {
+      trustedTypes: {
+        createPolicy: (name, rules) => ({ createScript: (s) => (created.push(name), { trusted: rules.createScript(s) }) }),
+      },
+      MutationObserver: class {
+        constructor(cb) {
+          observerCallback = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+      document: { documentElement: {}, querySelectorAll: () => [] },
+    }
+  );
+  observerCallback([{ addedNodes: [script] }]);
+  assert.deepEqual(created, ["localblock"]);
+  assert.deepEqual(script.textContent, { trusted: "patched();if (window.ytcsi) { js_ld(); }" });
+});

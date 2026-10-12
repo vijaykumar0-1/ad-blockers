@@ -62,8 +62,17 @@ function watchNodes(nodeName, pattern, options, onMatch) {
 
 function replaceNodeText(nodeName, pattern, replacement, ...rest) {
   if (!nodeName || !pattern) return;
+  // Sites like YouTube enforce Trusted Types, which blocks writing script text unless it goes
+  // through a policy. Create one (uBlock Origin does the same); fall back to plain text.
+  let policy = null;
+  try {
+    if (window.trustedTypes) {
+      policy = window.trustedTypes.createPolicy("localblock", { createScript: (s) => s });
+    }
+  } catch {}
   watchNodes(nodeName, pattern, varargs(rest), (node, text, re) => {
-    node.textContent = text.replace(re, replacement || "");
+    const out = text.replace(re, replacement || "");
+    node.textContent = policy && node.nodeName === "SCRIPT" ? policy.createScript(out) : out;
   });
 }
 
