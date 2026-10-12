@@ -167,8 +167,12 @@ export function convertFilter(line) {
   let action;
   let priority = allow ? PRIORITY.allow : important ? PRIORITY.important : PRIORITY.block;
 
-  if (documentOpt) {
-    if (!allow) return { skip: "block-document" };
+  if (documentOpt && !allow) {
+    // ||adsite^$document: never load that page, e.g. when a click hijacker redirects the tab.
+    if (types.length || excludedTypes.length) return { skip: "document-with-types" };
+    action = { type: "block" };
+    condition.resourceTypes = ["main_frame", "sub_frame"];
+  } else if (documentOpt) {
     // @@||site^$document: allow everything on pages from that site.
     action = { type: "allowAllRequests" };
     condition.resourceTypes = ["main_frame", "sub_frame"];

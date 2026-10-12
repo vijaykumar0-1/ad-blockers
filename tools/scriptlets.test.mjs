@@ -257,3 +257,59 @@ test("rpnt writes script text through a Trusted Types policy when the site requi
   assert.deepEqual(created, ["localblock"]);
   assert.deepEqual(script.textContent, { trusted: "patched();if (window.ytcsi) { js_ld(); }" });
 });
+
+test("nowoif returns a fake window for matching popups only", () => {
+  const opened = [];
+  const ctx = page("stream.example", "stream.example##+js(nowoif, /adserv|popunder/)", {
+    open: (url) => (opened.push(url), { real: true }),
+  });
+  const fake = vm.runInContext(`window.open("https://adserv.example/x")`, ctx);
+  assert.equal(fake.closed, false);
+  assert.doesNotThrow(() => fake.focus());
+  vm.runInContext(`window.open("https://stream.example/next")`, ctx);
+  assert.deepEqual(opened, ["https://stream.example/next"]);
+});
+
+test("aopr and aopw stop scripts that touch a property", () => {
+  const ctx = page("site.example", ["site.example##+js(aopr, popAds.init)", "site.example##+js(aopw, adBlockDetected)"].join("\n"));
+  vm.runInContext("window.popAds = { init() { return 'ran'; } }", ctx);
+  assert.throws(() => vm.runInContext("popAds.init()", ctx), /LocalBlock/);
+  assert.throws(() => vm.runInContext("window.adBlockDetected = true", ctx), /LocalBlock/);
+});
+
+test("acs aborts only scripts whose text matches", () => {
+  let current = { src: "", textContent: "" };
+  const ctx = page("site.example", "site.example##+js(acs, document.createElement, popunder)", {
+    document: {
+      createElement: () => "el",
+      get currentScript() {
+        return current;
+      },
+    },
+  });
+  current = { src: "", textContent: "var x = popunder();" };
+  assert.throws(() => vm.runInContext("document.createElement('a')", ctx), /LocalBlock/);
+  current = { src: "", textContent: "normal site code" };
+  assert.equal(vm.runInContext("document.createElement('a')", ctx), "el");
+});
+
+test("nostif and aeld drop matching timers and listeners", () => {
+  const timers = [];
+  const listeners = [];
+  function EventTarget() {}
+  EventTarget.prototype.addEventListener = function (type) {
+    listeners.push(type);
+  };
+  const ctx = page(
+    "site.example",
+    ["site.example##+js(nostif, location.href)", "site.example##+js(aeld, click, popMagic)"].join("\n"),
+    { setTimeout: (cb, ms) => timers.push(ms), EventTarget }
+  );
+  vm.runInContext("setTimeout(() => { location.href = 'https://ad.example'; }, 3000); setTimeout(() => 1, 100)", ctx);
+  assert.deepEqual(timers, [100]);
+  vm.runInContext(
+    "const t = new EventTarget(); t.addEventListener('click', function () { popMagic.go(); }); t.addEventListener('click', () => 'menu')",
+    ctx
+  );
+  assert.deepEqual(listeners, ["click"]);
+});

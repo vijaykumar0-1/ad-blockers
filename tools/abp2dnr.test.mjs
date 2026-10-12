@@ -59,6 +59,14 @@ test("exceptions outrank blocks; important outranks exceptions", () => {
   assert.ok(rule("||example.com^$important").priority > allow.priority);
 });
 
+test("$document blocks the page itself (redirect targets)", () => {
+  assert.deepEqual(rule("||adpage.example^$document"), {
+    priority: 1,
+    action: { type: "block" },
+    condition: { requestDomains: ["adpage.example"], resourceTypes: ["main_frame", "sub_frame"] },
+  });
+});
+
 test("@@ $document allows the whole page", () => {
   assert.deepEqual(rule("@@||site.com^$document"), {
     priority: 2,
@@ -74,7 +82,6 @@ test("unsupported filters are skipped, never broadened", () => {
   assert.equal(skip("||x.com^$redirect=noopjs"), "option:redirect");
   assert.equal(skip("||x.com^$unknownoption"), "option:unknownoption");
   assert.equal(skip("*$script"), "matches-everything");
-  assert.equal(skip("||x.com^$document"), "block-document");
   assert.equal(skip("/addyn|*;adtech;"), "pipe-in-middle");
 });
 

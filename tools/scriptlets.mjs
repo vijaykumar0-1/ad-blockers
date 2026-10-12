@@ -675,6 +675,206 @@ export function editInboundObject(fnChain, argPos, query) {
   });
 }
 
+// ---- popup and click-hijack defusers ------------------------------------------------------
+// Shared: "" matches everything, "/re/flags" is a regex, otherwise a plain substring; a
+// leading "!" inverts the test.
+export function makeNeedle(spec) {
+  let s = String(spec ?? "");
+  let invert = false;
+  if (s.startsWith("!")) {
+    invert = true;
+    s = s.slice(1);
+  }
+  let test;
+  if (s === "") test = () => true;
+  else {
+    const m = /^\/(.+)\/([gimsu]*)$/.exec(s);
+    const re = m ? new RegExp(m[1], m[2].replace("g", "")) : null;
+    test = re ? (t) => re.test(t) : (t) => t.includes(s);
+  }
+  return (text) => test(String(text)) !== invert;
+}
+
+// Walks "a.b.c" on window and calls onTrap(owner, prop) on the last link, trapping parents
+// that do not exist yet so it still works when the page creates them later.
+export function trapChainWith(chain, onTrap) {
+  const walk = (owner, rest) => {
+    const pos = rest.indexOf(".");
+    if (pos === -1) {
+      onTrap(owner, rest);
+      return;
+    }
+    const prop = rest.slice(0, pos);
+    const tail = rest.slice(pos + 1);
+    let current = owner[prop];
+    if (current !== null && (typeof current === "object" || typeof current === "function")) {
+      walk(current, tail);
+      return;
+    }
+    const desc = Object.getOwnPropertyDescriptor(owner, prop);
+    if (desc && desc.configurable === false) return;
+    try {
+      Object.defineProperty(owner, prop, {
+        configurable: true,
+        get: () => current,
+        set: (v) => {
+          current = v;
+          if (v !== null && (typeof v === "object" || typeof v === "function")) walk(v, tail);
+        },
+      });
+    } catch {}
+  };
+  walk(window, chain);
+}
+
+// aopr (abort-on-property-read): reading window.<chain> throws, which stops the ad script
+// that reads it.
+export function abortOnPropertyRead(chain) {
+  if (!chain) return;
+  const magic = "LocalBlock-" + Math.random().toString(36).slice(2);
+  trapChainWith(chain, (owner, prop) => {
+    try {
+      Object.defineProperty(owner, prop, {
+        configurable: true,
+        get: () => {
+          throw new ReferenceError(magic);
+        },
+        set: () => {},
+      });
+    } catch {}
+  });
+}
+
+// aopw (abort-on-property-write): assigning window.<chain> throws.
+export function abortOnPropertyWrite(chain) {
+  if (!chain) return;
+  const magic = "LocalBlock-" + Math.random().toString(36).slice(2);
+  trapChainWith(chain, (owner, prop) => {
+    try {
+      Object.defineProperty(owner, prop, {
+        configurable: true,
+        get: () => undefined,
+        set: () => {
+          throw new ReferenceError(magic);
+        },
+      });
+    } catch {}
+  });
+}
+
+// acs (abort-current-script): reading window.<chain> throws, but only from a script whose
+// text (or src) matches needle, so the site's own scripts keep working.
+export function abortCurrentScript(chain, needle) {
+  if (!chain) return;
+  const matches = makeNeedle(needle);
+  const magic = "LocalBlock-" + Math.random().toString(36).slice(2);
+  const parts = chain.split(".");
+  const last = parts.pop();
+  let owner = window;
+  for (const p of parts) {
+    owner = owner?.[p];
+    if (owner === null || owner === undefined) return;
+  }
+  const desc = Object.getOwnPropertyDescriptor(owner, last);
+  if (desc && desc.configurable === false) return;
+  let value = owner[last];
+  const getter = desc && desc.get;
+  const setter = desc && desc.set;
+  const shouldAbort = () => {
+    const script = document.currentScript;
+    if (!script) return false;
+    const text = script.src ? script.src : script.textContent || "";
+    return matches(text);
+  };
+  try {
+    Object.defineProperty(owner, last, {
+      configurable: true,
+      get() {
+        if (shouldAbort()) throw new ReferenceError(magic);
+        return getter ? getter.call(this) : value;
+      },
+      set(v) {
+        if (shouldAbort()) throw new ReferenceError(magic);
+        if (setter) setter.call(this, v);
+        else value = v;
+      },
+    });
+  } catch {}
+}
+
+// aeld (addEventListener-defuser): drop event listeners whose type and handler code match.
+export function addEventListenerDefuser(type, pattern) {
+  const typeOk = makeNeedle(type);
+  const codeOk = makeNeedle(pattern);
+  const proto = window.EventTarget && window.EventTarget.prototype;
+  if (!proto) return;
+  proto.addEventListener = new Proxy(proto.addEventListener, {
+    apply(target, thisArg, args) {
+      const [t, handler] = args;
+      let code = "";
+      try {
+        code = typeof handler === "function" ? Function.prototype.toString.call(handler) : String(handler?.handleEvent || "");
+      } catch {}
+      if (typeOk(t) && codeOk(code)) return undefined;
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+}
+
+// nostif (no-setTimeout-if): don't schedule timers whose callback matches needle (and delay,
+// if given). Used to stop delayed redirects.
+export function noSetTimeoutIf(needle, delay) {
+  const matches = makeNeedle(needle);
+  let wantDelay = null;
+  let invertDelay = false;
+  if (delay !== undefined && delay !== "") {
+    let d = String(delay);
+    if (d.startsWith("!")) {
+      invertDelay = true;
+      d = d.slice(1);
+    }
+    wantDelay = Number(d);
+    if (!Number.isFinite(wantDelay)) wantDelay = null;
+  }
+  window.setTimeout = new Proxy(window.setTimeout, {
+    apply(target, thisArg, args) {
+      const [cb, ms] = args;
+      let code = "";
+      try {
+        code = typeof cb === "function" ? Function.prototype.toString.call(cb) : String(cb);
+      } catch {}
+      const delayOk = wantDelay === null || (Number(ms) === wantDelay) !== invertDelay;
+      if (matches(code) && delayOk) return 0;
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+}
+
+// nowoif (no-window-open-if): window.open() for matching URLs returns a harmless fake window
+// instead of opening a popup or popunder.
+export function noWindowOpenIf(pattern) {
+  const matches = makeNeedle(pattern);
+  const noop = () => {};
+  const fakeWindow = () => {
+    const target = { closed: false, location: { href: "about:blank" }, document: {}, opener: null };
+    return new Proxy(target, {
+      get(t, prop) {
+        if (prop in t) return t[prop];
+        if (prop === "window" || prop === "self") return t;
+        return noop;
+      },
+      set: () => true,
+    });
+  };
+  window.open = new Proxy(window.open, {
+    apply(target, thisArg, args) {
+      const url = args[0] === undefined ? "" : String(args[0]);
+      if (matches(url)) return fakeWindow();
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+}
+
 // ---- registry --------------------------------------------------------------------------
 // name in filters -> { fn, helpers the fn needs, trusted: only from uBlock Origin's own lists }
 export const SCRIPTLETS = {
@@ -710,6 +910,18 @@ export const SCRIPTLETS = {
   "remove-node-text": { fn: removeNodeText, helpers: [varargs, watchNodes] },
   "trusted-prevent-dom-bypass": { fn: preventDomBypass, helpers: [], trusted: true },
   "trusted-edit-inbound-object": { fn: editInboundObject, helpers: [makeJsonEditor], trusted: true },
+  aopr: { fn: abortOnPropertyRead, helpers: [trapChainWith] },
+  "abort-on-property-read": { fn: abortOnPropertyRead, helpers: [trapChainWith] },
+  aopw: { fn: abortOnPropertyWrite, helpers: [trapChainWith] },
+  "abort-on-property-write": { fn: abortOnPropertyWrite, helpers: [trapChainWith] },
+  acs: { fn: abortCurrentScript, helpers: [makeNeedle] },
+  "abort-current-script": { fn: abortCurrentScript, helpers: [makeNeedle] },
+  aeld: { fn: addEventListenerDefuser, helpers: [makeNeedle] },
+  "addEventListener-defuser": { fn: addEventListenerDefuser, helpers: [makeNeedle] },
+  nostif: { fn: noSetTimeoutIf, helpers: [makeNeedle] },
+  "no-setTimeout-if": { fn: noSetTimeoutIf, helpers: [makeNeedle] },
+  nowoif: { fn: noWindowOpenIf, helpers: [makeNeedle] },
+  "no-window-open-if": { fn: noWindowOpenIf, helpers: [makeNeedle] },
 };
 
 export { makeJsonPruner };

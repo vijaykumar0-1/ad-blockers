@@ -6,6 +6,7 @@
 //
 //   rules/cosmetic.json     element-hiding (##) filters from both lists
 //   rules/scriptlets/       +js() scriptlet filters, mainly from uBlock Origin's lists
+//   rules/popup.json        $popup filters: ad destinations pages open in new tabs
 //
 // Usage: node tools/build-rules.mjs
 // No dependencies, no network access.
@@ -15,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertList, validateRule } from "./abp2dnr.mjs";
 import { compileCosmetic } from "./cosmetic.mjs";
+import { compilePopups } from "./popup.mjs";
 import { generateFile, hostsFor, parseScriptletFilters } from "./scriptlet-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -108,6 +110,16 @@ function main() {
   }
 
   const uboPath = join(root, "lists", "ubo.txt");
+  const popupSources = existsSync(uboPath) ? [...listTexts, readFileSync(uboPath, "utf8")] : listTexts;
+  if (popupSources.length) {
+    const { data, stats } = compilePopups(popupSources);
+    writeFileSync(join(root, "rules", "popup.json"), JSON.stringify(data));
+    console.log(
+      `popups       ${data.domains.length} ad domains + ${data.rules.length} patterns, ${data.exceptions.length} exceptions; ` +
+        `skipped ${JSON.stringify(stats.skipped)}`
+    );
+  }
+
   if (existsSync(uboPath)) {
     // trusted-* scriptlets rewrite page code, so only uBlock Origin's own lists may use them.
     const sources = [

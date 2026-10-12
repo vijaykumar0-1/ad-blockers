@@ -1,0 +1,41 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { compilePopups } from "./popup.mjs";
+import { isAdPopup, patternToRegExp } from "../src/popup-match.js";
+
+const list = [
+  "||popads.example^$popup",
+  "||clickfarm.example^$popup,third-party",
+  "/go/offer?$popup,domain=streamsite.example",
+  "||adserver.example/redirect/*$popup",
+  "@@||adserver.example/redirect/legit$popup",
+  "||ads.example^$script", // not a popup filter
+].join("\n");
+const { data } = compilePopups([list]);
+
+test("compiles popup filters", () => {
+  assert.deepEqual(data.domains, ["popads.example"]);
+  assert.equal(data.rules.length, 3);
+  assert.equal(data.exceptions.length, 1);
+});
+
+test("pattern to regexp", () => {
+  const re = patternToRegExp("||adserver.example/redirect/*");
+  assert.ok(re.test("https://adserver.example/redirect/abc"));
+  assert.ok(re.test("https://cdn.adserver.example/redirect/x"));
+  assert.ok(!re.test("https://notadserver.example/redirect/x"));
+  assert.ok(patternToRegExp("||x.com^").test("https://x.com/"));
+  assert.ok(!patternToRegExp("||x.com^").test("https://x.community/"));
+});
+
+test("closes ad popups, keeps normal new tabs", () => {
+  assert.equal(isAdPopup(data, "https://popads.example/landing", "news.site"), true);
+  assert.equal(isAdPopup(data, "https://www.popads.example/x", "news.site"), true);
+  assert.equal(isAdPopup(data, "https://clickfarm.example/", "news.site"), true);
+  assert.equal(isAdPopup(data, "https://streamsite.example/go/offer?id=1", "streamsite.example"), true);
+  assert.equal(isAdPopup(data, "https://other.example/go/offer?id=1", "streamsite.example"), true, "any destination, from that site");
+  assert.equal(isAdPopup(data, "https://other.example/go/offer?id=1", "elsewhere.example"), false, "rule is limited to streamsite");
+  assert.equal(isAdPopup(data, "https://adserver.example/redirect/legit", "news.site"), false, "exception");
+  assert.equal(isAdPopup(data, "https://wikipedia.org/wiki/X", "news.site"), false);
+  assert.equal(isAdPopup(data, "chrome://newtab/", "news.site"), false);
+});

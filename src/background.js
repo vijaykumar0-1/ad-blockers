@@ -3,6 +3,7 @@
 // It makes no network requests; rules/cosmetic.json is read from inside the extension.
 
 import { hostCandidates, pagePlan, selectorsForTokens, toCss } from "./cosmetic-lookup.js";
+import { isAdPopup } from "./popup-match.js";
 
 // Every static ruleset declared in manifest.json (base, easylist, easyprivacy, ...).
 const RULESETS = chrome.runtime
@@ -143,6 +144,50 @@ async function injectCss(sender, selectors) {
     .insertCSS({ target, css: toCss(selectors), origin: "USER" })
     .catch(() => undefined); // the frame may already be gone
 }
+
+// ---- popups and click redirects -----------------------------------------------
+// When a page opens a new tab or window (window.open, target=_blank, popunders), check
+// where it is going against rules/popup.json and close it if it's a known ad destination.
+// Tabs only count as popups for a few seconds after they open, while they settle on a URL.
+
+let popupData = null;
+function loadPopups() {
+  popupData ||= fetch(chrome.runtime.getURL("rules/popup.json")).then((r) => r.json());
+  return popupData;
+}
+
+const youngTabs = new Map(); // tabId -> opener host
+
+async function checkPopup(tabId, url) {
+  const openerHost = youngTabs.get(tabId);
+  if (!openerHost || !url) return;
+  if (isAdPopup(await loadPopups(), url, openerHost)) {
+    youngTabs.delete(tabId);
+    await chrome.tabs.remove(tabId).catch(() => undefined);
+  }
+}
+
+chrome.tabs.onCreated.addListener(async (tab) => {
+  if (tab.openerTabId === undefined) return;
+  let opener;
+  try {
+    opener = await chrome.tabs.get(tab.openerTabId);
+  } catch {
+    return;
+  }
+  const openerHost = hostOf(opener.url);
+  if (!openerHost) return;
+  const pause = await pauseState();
+  if (pause.everywhere || hostCandidates(openerHost).some((h) => pause.sites.has(normalizeHost(h)))) return;
+  youngTabs.set(tab.id, openerHost);
+  setTimeout(() => youngTabs.delete(tab.id), 5000);
+  await checkPopup(tab.id, tab.pendingUrl || tab.url);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url && youngTabs.has(tabId)) checkPopup(tabId, changeInfo.url);
+});
+chrome.tabs.onRemoved.addListener((tabId) => youngTabs.delete(tabId));
 
 // ---- scriptlets ------------------------------------------------------------
 // Each file in rules/scriptlets/ is registered to run inside pages (MAIN world, before the
