@@ -5,7 +5,7 @@ A small, auditable ad blocker for Chrome. Everything runs on your machine. The e
 ## How it works
 
 - **Network blocking.** The `rules/*.json` files are Chrome `declarativeNetRequest` rulesets. Chrome itself matches every request against them, so blocking happens inside the browser, with no extension code inspecting your traffic.
-- **Filter lists.** Besides LocalBlock's own short list (`rules/domains.txt`), the extension ships [EasyList](https://easylist.to/) (ads) and EasyPrivacy (trackers), compiled into rulesets at build time. Updating them is a build step; the extension never downloads anything.
+- **Filter lists.** Besides LocalBlock's own short list (`rules/domains.txt`) and site fixes (`filters/localblock.txt`), the extension ships [EasyList](https://easylist.to/) (ads) and EasyPrivacy (trackers), compiled into rulesets at build time. Updating them is a build step; the extension never downloads anything.
 - **Cosmetic filtering.** A small content script reports the class and id names it sees on a page to LocalBlock's own service worker, which injects matching hiding CSS from `rules/cosmetic.json`. Generic selectors are only sent once their class or id actually appears, so pages don't carry thousands of unused rules. The CSS is injected as a user stylesheet, which the page cannot see or override.
 - **Scriptlets.** Some ads can't be reached by network or CSS rules. YouTube's video ads arrive inside the same data as the video. For those, LocalBlock runs small functions inside the page before the site's own scripts, such as removing `adPlacements` from YouTube's player data. They are driven by `+js(...)` filters from uBlock Origin's community lists, compiled at build time into `rules/scriptlets/`, and each file is registered only for the sites that have filters for it.
 - **Popups and click redirects.** When a page opens a new tab or window, LocalBlock checks where it's going against the `$popup` filters in `rules/popup.json` and closes it if it's a known ad destination. Known ad landing pages (`$document` filters) are blocked outright, so a hijacked click that redirects the tab goes nowhere. Scriptlets such as `nowoif`, `aopr` and `acs` stop the popunder scripts themselves on sites known to use them.
@@ -49,7 +49,7 @@ Then click the reload icon for LocalBlock on `chrome://extensions`.
 
 YouTube changes its code often to break ad blockers, and the community lists change to keep up. If video ads come back, run `npm run update` and reload the extension. On some videos YouTube's server deliberately holds the stream back for a few seconds when ads are blocked; that wait comes from YouTube and can't be removed from inside the browser.
 
-To change LocalBlock's own list, edit `rules/domains.txt` and run `npm run build`.
+To change LocalBlock's own short domain list, edit `rules/domains.txt`. For site fixes the community lists don't cover yet, add filters (uBlock Origin syntax) to `filters/localblock.txt`; they're compiled into every rule type alongside the community lists. Then run `npm run build`.
 
 ## Roadmap
 

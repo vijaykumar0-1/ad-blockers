@@ -39,3 +39,12 @@ test("closes ad popups, keeps normal new tabs", () => {
   assert.equal(isAdPopup(data, "https://wikipedia.org/wiki/X", "news.site"), false);
   assert.equal(isAdPopup(data, "chrome://newtab/", "news.site"), false);
 });
+
+test("same-site ad bridges are closed when a site.* rule says so (hianime /continue)", () => {
+  const { data: d } = compilePopups(["/continue?$popup,domain=hianime.*\n/continue|$popup,domain=hianime.*"]);
+  assert.equal(isAdPopup(d, "https://hianime.ms/continue?i=3&t=1712", "hianime.ms"), true);
+  assert.equal(isAdPopup(d, "https://hianime.to/continue", "hianime.to"), true);
+  assert.equal(isAdPopup(d, "https://hianime.ms/watch-one-piece-episode-1181", "hianime.ms"), false, "normal links still open");
+  assert.equal(isAdPopup(d, "https://hianime.ms/continue-watching", "hianime.ms"), false);
+  assert.equal(isAdPopup(d, "https://other.example/continue?x", "other.example"), false, "other sites unaffected");
+});

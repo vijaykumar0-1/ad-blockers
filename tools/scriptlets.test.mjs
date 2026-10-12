@@ -340,3 +340,21 @@ test("site.* filters apply on any domain of that site, and only there", () => {
   assert.equal(run("example.com", "delete window.z")(), "added");
   assert.equal(run("hianime.example", "delete window.z")(), "added");
 });
+
+test("lb-no-anchor-click-if stops hidden ad-link clicks, leaves real links alone", () => {
+  const clicked = [];
+  function EventTarget() {}
+  EventTarget.prototype.dispatchEvent = function () { clicked.push("dispatched:" + this.href); return true; };
+  function HTMLElement() {}
+  HTMLElement.prototype = Object.create(EventTarget.prototype); // as in browsers
+  HTMLElement.prototype.click = function () { clicked.push(this.href); };
+  HTMLElement.prototype.closest = function () { return this.href ? this : null; };
+  const ctx = page("hianime.ms", "hianime.*##+js(lb-no-anchor-click-if, /\\/continue(?:[?#]|$)/)", { HTMLElement, EventTarget });
+  vm.runInContext(`
+    const mk = (href) => { const a = new HTMLElement(); a.href = href; return a; };
+    mk("https://hianime.ms/continue?i=2").click();
+    mk("https://hianime.ms/watch-one-piece-episode-1181").click();
+    mk("https://hianime.ms/continue").dispatchEvent({ type: "click" });
+  `, ctx);
+  assert.deepEqual(clicked, ["https://hianime.ms/watch-one-piece-episode-1181"]);
+});

@@ -3,7 +3,7 @@
 // blocking rules can't do this because the request itself is a normal page load.
 // No dependencies, no network access.
 
-const DOMAIN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const DOMAIN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.\*)?$/;
 
 function parseLine(line) {
   let f = line.trim();

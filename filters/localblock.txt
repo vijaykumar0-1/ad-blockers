@@ -1,0 +1,20 @@
+! Title: LocalBlock fixes
+! LocalBlock's own filters, for sites the community lists don't cover yet.
+! Same syntax as uBlock Origin's lists. Compiled by tools/build-rules.mjs with the others.
+!
+! hianime: "ad gate" buttons and clicks anywhere open a new tab through a same-site
+! bridge (/continue) that the server redirects to rotating ads. The script clicks a hidden
+! <a target="_blank"> during the user's click, with window.open as a fallback.
+! 1) don't let the page click those links or window.open them
+hianime.*##+js(lb-no-anchor-click-if, /\/continue(?:[?#]|$)/)
+hianime.*##+js(nowoif, /\/continue(?:[?#]|$)/)
+! 2) if a tab opens anyway, close it
+/continue?$popup,domain=hianime.*
+/continue|$popup,domain=hianime.*
+! 3) and never let the bridge load (Safari reports a new tab's address late)
+||hianime.ms/continue^$document
+||hianime.to/continue^$document
+||hianime.nz/continue^$document
+||hianime.se/continue^$document
+||hianime.sx/continue^$document
+||hianime.bz/continue^$document

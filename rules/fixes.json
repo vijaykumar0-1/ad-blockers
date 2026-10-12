@@ -1,0 +1,8 @@
+[
+{"id":1,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.ms/continue^","resourceTypes":["main_frame","sub_frame"]}},
+{"id":2,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.to/continue^","resourceTypes":["main_frame","sub_frame"]}},
+{"id":3,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.nz/continue^","resourceTypes":["main_frame","sub_frame"]}},
+{"id":4,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.se/continue^","resourceTypes":["main_frame","sub_frame"]}},
+{"id":5,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.sx/continue^","resourceTypes":["main_frame","sub_frame"]}},
+{"id":6,"priority":1,"action":{"type":"block"},"condition":{"urlFilter":"||hianime.bz/continue^","resourceTypes":["main_frame","sub_frame"]}}
+]

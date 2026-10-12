@@ -875,6 +875,35 @@ export function noWindowOpenIf(pattern) {
   });
 }
 
+// lb-no-anchor-click-if (LocalBlock's own): ignore script-triggered clicks on links whose
+// URL matches needle. Popunder scripts create a hidden <a target="_blank"> and click it
+// during the user's real click, which slips past popup blockers.
+export function noAnchorClickIf(needle) {
+  const matches = makeNeedle(needle);
+  const proto = window.HTMLElement && window.HTMLElement.prototype;
+  if (!proto) return;
+  const isBadLink = (el) => {
+    const a = el && el.closest ? el.closest("a[href]") : null;
+    return !!a && matches(a.href || a.getAttribute("href") || "");
+  };
+  proto.click = new Proxy(proto.click, {
+    apply(target, thisArg, args) {
+      if (isBadLink(thisArg)) return undefined;
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+  const ET = window.EventTarget && window.EventTarget.prototype;
+  if (ET) {
+    ET.dispatchEvent = new Proxy(ET.dispatchEvent, {
+      apply(target, thisArg, args) {
+        const ev = args[0];
+        if (ev && ev.type === "click" && isBadLink(thisArg)) return false;
+        return Reflect.apply(target, thisArg, args);
+      },
+    });
+  }
+}
+
 // ---- registry --------------------------------------------------------------------------
 // name in filters -> { fn, helpers the fn needs, trusted: only from uBlock Origin's own lists }
 export const SCRIPTLETS = {
@@ -922,6 +951,7 @@ export const SCRIPTLETS = {
   "no-setTimeout-if": { fn: noSetTimeoutIf, helpers: [makeNeedle] },
   nowoif: { fn: noWindowOpenIf, helpers: [makeNeedle] },
   "no-window-open-if": { fn: noWindowOpenIf, helpers: [makeNeedle] },
+  "lb-no-anchor-click-if": { fn: noAnchorClickIf, helpers: [makeNeedle] },
 };
 
 export { makeJsonPruner };

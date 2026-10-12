@@ -29,9 +29,15 @@ export function patternToRegExp(pattern) {
   return re;
 }
 
+// A host, its parent domains, and "site.*" forms for filters written for every domain of a site.
 function hostChain(host) {
   const labels = String(host || "").toLowerCase().split(".");
-  return labels.map((_, i) => labels.slice(i).join("."));
+  const out = [];
+  for (let i = 0; i < labels.length; i++) {
+    out.push(labels.slice(i).join("."));
+    for (let r = 1; r <= 2; r++) if (labels.length - i > r) out.push(labels.slice(i, labels.length - r).join(".") + ".*");
+  }
+  return out;
 }
 
 // "Same site" is approximated as one host being the other or a subdomain of it, or both

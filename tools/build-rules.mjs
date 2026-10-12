@@ -7,6 +7,7 @@
 //   rules/cosmetic.json     element-hiding (##) filters from both lists
 //   rules/scriptlets/       +js() scriptlet filters, mainly from uBlock Origin's lists
 //   rules/popup.json        $popup filters: ad destinations pages open in new tabs
+//   rules/fixes.json        network rules from filters/localblock.txt (LocalBlock's own fixes)
 //
 // Usage: node tools/build-rules.mjs
 // No dependencies, no network access.
@@ -75,6 +76,12 @@ function main() {
   total += write("base", base);
   console.log(`base         ${base.length} rules`);
 
+  // LocalBlock's own fixes ship with the repo, so they build even without downloaded lists.
+  const ownText = readFileSync(join(root, "filters", "localblock.txt"), "utf8");
+  const own = convertList(ownText);
+  total += write("fixes", own.rules);
+  console.log(`fixes        ${own.rules.length} rules from filters/localblock.txt`);
+
   const listTexts = [];
   for (const id of ["easylist", "easyprivacy"]) {
     const src = join(root, "lists", `${id}.txt`);
@@ -102,8 +109,8 @@ function main() {
   if (listTexts.length) {
     // uBlock's own list carries many site-specific fixes; keep only its blocks meant for MV3 Chromium.
     const cosmeticSources = existsSync(uboCosmeticPath)
-      ? [...listTexts, preparse(readFileSync(uboCosmeticPath, "utf8"))]
-      : listTexts;
+      ? [...listTexts, preparse(readFileSync(uboCosmeticPath, "utf8")), ownText]
+      : [...listTexts, ownText];
     const { data, stats } = compileCosmetic(cosmeticSources);
     writeFileSync(join(root, "rules", "cosmetic.json"), JSON.stringify(data));
     const keyed = Object.values(data.generic.keyed).reduce((a, b) => a + b.length, 0);
@@ -116,7 +123,7 @@ function main() {
   }
 
   const uboPath = join(root, "lists", "ubo.txt");
-  const popupSources = existsSync(uboPath) ? [...listTexts, readFileSync(uboPath, "utf8")] : listTexts;
+  const popupSources = [...listTexts, ...(existsSync(uboPath) ? [readFileSync(uboPath, "utf8")] : []), ownText];
   if (popupSources.length) {
     const { data, stats } = compilePopups(popupSources);
     writeFileSync(join(root, "rules", "popup.json"), JSON.stringify(data));
@@ -130,6 +137,7 @@ function main() {
     // trusted-* scriptlets rewrite page code, so only uBlock Origin's own lists may use them.
     const sources = [
       { text: readFileSync(uboPath, "utf8"), trusted: true },
+      { text: ownText, trusted: true },
       ...listTexts.map((text) => ({ text, trusted: false })),
     ];
     const { byName, disableAll, stats } = parseScriptletFilters(sources);
