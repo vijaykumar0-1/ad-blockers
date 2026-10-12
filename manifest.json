@@ -3,6 +3,12 @@
   "name": "LocalBlock",
   "version": "0.5.0",
   "description": "A small, auditable ad blocker. Everything runs on your machine; nothing about your browsing is sent anywhere.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "minimum_chrome_version": "121",
   "permissions": [
     "declarativeNetRequest",
@@ -35,7 +41,12 @@
   ],
   "action": {
     "default_title": "LocalBlock",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
   },
   "declarative_net_request": {
     "rule_resources": [

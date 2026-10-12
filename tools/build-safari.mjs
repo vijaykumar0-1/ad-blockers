@@ -17,7 +17,7 @@ const out = join(root, "dist", "safari");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "src"), { recursive: true });
 
-for (const dir of ["rules"]) cpSync(join(root, dir), join(out, dir), { recursive: true });
+for (const dir of ["rules", "icons"]) cpSync(join(root, dir), join(out, dir), { recursive: true });
 for (const file of ["LICENSE", "src/popup.html", "src/popup.css", "src/popup.js", "src/cosmetic.js"]) {
   cpSync(join(root, file), join(out, file));
 }
@@ -35,6 +35,13 @@ writeFileSync(
 
 const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
 delete manifest.minimum_chrome_version;
+// Content-script keys Safari doesn't support (it ignores them, but the converter warns).
+for (const cs of manifest.content_scripts || []) {
+  delete cs.match_origin_as_fallback;
+  delete cs.match_about_blank;
+}
+// Safari's app icon comes from the largest size.
+manifest.icons = { ...manifest.icons, 256: "icons/icon-256.png", 512: "icons/icon-512.png" };
 manifest.background = { service_worker: "src/background.js" };
 manifest.browser_specific_settings = { safari: { strict_min_version: "26.0" } };
 writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
