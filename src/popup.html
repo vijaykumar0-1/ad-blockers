@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LocalBlock</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>LocalBlock</h1>
+    <span id="status-pill" class="pill">…</span>
+  </header>
+
+  <section class="site">
+    <div id="host" class="host">—</div>
+    <div class="count"><span id="blocked">0</span> requests blocked on this page</div>
+  </section>
+
+  <section class="controls">
+    <label class="row">
+      <span>Block ads on this site</span>
+      <input type="checkbox" id="site-toggle" role="switch">
+    </label>
+    <label class="row">
+      <span>Block ads everywhere</span>
+      <input type="checkbox" id="global-toggle" role="switch">
+    </label>
+  </section>
+
+  <p id="hint" class="hint" hidden>Reload the page to apply the change.</p>
+  <p id="error" class="error" hidden></p>
+
+  <footer>Runs entirely on this computer. No data leaves your browser.</footer>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

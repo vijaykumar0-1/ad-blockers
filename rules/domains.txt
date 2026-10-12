@@ -1,0 +1,52 @@
+# Core ad and tracking domains blocked by LocalBlock's base ruleset.
+# One domain per line; subdomains are matched automatically.
+# Requests to these domains are blocked only when they come from a different site
+# (third-party), so visiting a domain directly still works.
+# Edit this file, then run: node tools/build-rules.mjs
+
+# Google ad network
+doubleclick.net
+googlesyndication.com
+googleadservices.com
+adservice.google.com
+pagead2.googlesyndication.com
+googletagservices.com
+
+# Amazon ads
+amazon-adsystem.com
+
+# Ad exchanges and SSPs
+adnxs.com
+rubiconproject.com
+pubmatic.com
+openx.net
+casalemedia.com
+indexww.com
+criteo.com
+criteo.net
+smartadserver.com
+adform.net
+yieldmo.com
+sharethrough.com
+triplelift.com
+33across.com
+media.net
+contextweb.com
+sovrn.com
+lijit.com
+bidswitch.net
+adsrvr.org
+demdex.net
+
+# Content recommendation ads
+taboola.com
+outbrain.com
+revcontent.com
+mgid.com
+
+# Trackers commonly bundled with ads
+scorecardresearch.com
+quantserve.com
+moatads.com
+doubleverify.com
+adsafeprotected.com
