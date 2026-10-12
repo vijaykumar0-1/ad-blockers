@@ -23969,5 +23969,12 @@
    "zpaste.net",
    "zrozz.com"
   ]
+ },
+ {
+  "id": "_entities",
+  "file": "rules/scriptlets/_entities.js",
+  "hosts": [
+   "*"
+  ]
  }
 ]

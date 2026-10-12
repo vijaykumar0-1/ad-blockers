@@ -81,6 +81,10 @@ export function parseArgs(inner) {
 }
 
 const DOMAIN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
+// "site.*" means site on any public suffix (site.to, site.ms, site.co.uk, ...).
+const ENTITY_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.\*$/;
+const isHost = (d) => DOMAIN_RE.test(d) || ENTITY_RE.test(d);
+export const isEntity = (d) => d.endsWith(".*");
 
 /**
  * Parses the scriptlet filters out of list texts.
@@ -123,8 +127,8 @@ export function parseScriptletFilters(sources) {
         skip(isException ? "generic-exception" : "generic");
         continue;
       }
-      const hosts = include.filter((d) => DOMAIN_RE.test(d));
-      if (hosts.length < include.length) skip("entity-or-bad-domain");
+      const hosts = include.filter(isHost);
+      if (hosts.length < include.length) skip("bad-domain");
       if (!hosts.length) continue;
 
       const key = entry.fn.name;
@@ -136,7 +140,7 @@ export function parseScriptletFilters(sources) {
       if (!isException) {
         for (const d of domains.filter((x) => x.startsWith("~"))) {
           const h = d.slice(1);
-          if (DOMAIN_RE.test(h)) (byName[key].exclude[h] ||= new Set()).add(argsKey);
+          if (isHost(h)) (byName[key].exclude[h] ||= new Set()).add(argsKey);
         }
       }
       stats.used++;
@@ -148,7 +152,12 @@ export function parseScriptletFilters(sources) {
 // Runtime part of every generated file: decide which argument sets apply to this page.
 function selectArgs(table, disableAll) {
   const labels = location.hostname.toLowerCase().split(".");
-  const hosts = labels.map((_, i) => labels.slice(i).join("."));
+  const hosts = [];
+  for (let i = 0; i < labels.length; i++) {
+    hosts.push(labels.slice(i).join("."));
+    // entity forms: "a.b.site.co.uk" also matches "site.*" (suffix of one or two labels)
+    for (let r = 1; r <= 2; r++) if (labels.length - i > r) hosts.push(labels.slice(i, labels.length - r).join(".") + ".*");
+  }
   if (hosts.some((h) => disableAll.includes(h))) return [];
   const excluded = new Set();
   for (const h of hosts) for (const i of table.exclude[h] || []) excluded.add(i);
@@ -158,7 +167,13 @@ function selectArgs(table, disableAll) {
 }
 
 /** Generates the source of one injectable file for one scriptlet. */
-export function generateFile({ entry, include, exclude }, disableAll) {
+/**
+ * part: "exact" keeps only plain hostnames, "entity" only "site.*" entries; omit for both.
+ */
+export function generateFile({ entry, include: allInclude, exclude }, disableAll, part) {
+  const include = Object.fromEntries(
+    Object.entries(allInclude).filter(([h]) => !part || (part === "entity") === isEntity(h))
+  );
   const args = [];
   const index = new Map();
   const idx = (k) => {
@@ -196,5 +211,10 @@ for (const args of selectArgs(table, disableAll)) {
 
 /** Hosts a file must be registered for (hosts with at least one non-excepted filter). */
 export function hostsFor({ include }) {
-  return Object.keys(include).sort();
+  return Object.keys(include).filter((h) => !isEntity(h)).sort();
+}
+
+/** True if the group has "site.*" filters, which need a file that loads on every site. */
+export function hasEntities({ include }) {
+  return Object.keys(include).some(isEntity);
 }

@@ -1,6 +1,6 @@
 {
   "name": "localblock",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "A small, auditable ad blocker for Chrome that runs entirely on your machine.",
   "license": "GPL-3.0-or-later",

@@ -313,3 +313,30 @@ test("nostif and aeld drop matching timers and listeners", () => {
   );
   assert.deepEqual(listeners, ["click"]);
 });
+
+test("site.* filters apply on any domain of that site, and only there", () => {
+  const filter = "hianime.*,~hianime.example##+js(acs, EventTarget.prototype.addEventListener, delete window)";
+  const run = (hostname, scriptText) => {
+    function EventTarget() {}
+    EventTarget.prototype.addEventListener = () => "added";
+    const { byName, disableAll } = parseScriptletFilters([{ text: filter, trusted: true }]);
+    const ctx = {
+      location: { hostname },
+      console,
+      EventTarget,
+      document: { currentScript: { src: "", textContent: scriptText } },
+    };
+    ctx.window = ctx;
+    vm.createContext(ctx);
+    for (const group of Object.values(byName)) vm.runInContext(generateFile(group, disableAll, "entity"), ctx);
+    return () => vm.runInContext("new EventTarget().addEventListener('click', () => {})", ctx);
+  };
+  // The click-hijacking script on hianime.ms is stopped...
+  assert.throws(run("hianime.ms", "document.onclick=...;delete window.x"), /LocalBlock/);
+  assert.throws(run("www.hianime.to", "delete window.y"), /LocalBlock/);
+  // ...the site's own scripts still work...
+  assert.equal(run("hianime.ms", "player.init()")(), "added");
+  // ...and other sites, or an excluded domain, are untouched.
+  assert.equal(run("example.com", "delete window.z")(), "added");
+  assert.equal(run("hianime.example", "delete window.z")(), "added");
+});

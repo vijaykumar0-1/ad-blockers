@@ -196,6 +196,7 @@ chrome.tabs.onRemoved.addListener((tabId) => youngTabs.delete(tabId));
 const SCRIPTLET_PREFIX = "scriptlet-";
 
 function sitePatterns(host) {
+  if (host === "*") return ["*://*/*"]; // "site.*" filters: the script checks the hostname itself
   return [`*://${host}/*`, `*://*.${host}/*`];
 }
 

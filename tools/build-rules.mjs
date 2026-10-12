@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { convertList, validateRule } from "./abp2dnr.mjs";
 import { compileCosmetic } from "./cosmetic.mjs";
 import { compilePopups } from "./popup.mjs";
-import { generateFile, hostsFor, parseScriptletFilters } from "./scriptlet-build.mjs";
+import { generateFile, hasEntities, hostsFor, parseScriptletFilters } from "./scriptlet-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -131,16 +131,28 @@ function main() {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const index = [];
+    const entityParts = [];
     for (const [name, group] of Object.entries(byName).sort()) {
-      const file = `rules/scriptlets/${name}.js`;
-      writeFileSync(join(root, file), generateFile(group, disableAll));
-      index.push({ id: name, file, hosts: hostsFor(group) });
+      const hosts = hostsFor(group);
+      if (hosts.length) {
+        const file = `rules/scriptlets/${name}.js`;
+        writeFileSync(join(root, file), generateFile(group, disableAll, "exact"));
+        index.push({ id: name, file, hosts });
+      }
+      if (hasEntities(group)) entityParts.push(generateFile(group, disableAll, "entity"));
+    }
+    // "site.*" filters can't be expressed as match patterns, so they share one file that
+    // loads on every site and checks the hostname before doing anything.
+    if (entityParts.length) {
+      const file = "rules/scriptlets/_entities.js";
+      writeFileSync(join(root, file), entityParts.join("\n"));
+      index.push({ id: "_entities", file, hosts: ["*"] });
     }
     writeFileSync(join(dir, "index.json"), JSON.stringify(index, null, 1) + "\n");
     const unsupported = Object.entries(stats.skipped).filter(([k]) => k.startsWith("unsupported:"));
     const otherSkips = Object.entries(stats.skipped).filter(([k]) => !k.startsWith("unsupported:"));
     console.log(
-      `scriptlets   ${stats.used} filters for ${index.map((i) => `${i.id} (${i.hosts.length} sites)`).join(", ")}; ` +
+      `scriptlets   ${stats.used} filters for ${index.map((i) => `${i.id} (${i.hosts[0] === "*" ? "every site, by name" : i.hosts.length + " sites"})`).join(", ")}; ` +
         `${unsupported.reduce((a, [, v]) => a + v, 0)} use scriptlets not implemented yet; ` +
         `skipped ${JSON.stringify(Object.fromEntries(otherSkips))}`
     );

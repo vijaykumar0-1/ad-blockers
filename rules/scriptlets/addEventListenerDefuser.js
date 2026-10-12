@@ -6,7 +6,12 @@ const table = {"include":{"01fmovies.com":[0],"0dramacool.net":[1],"185.53.88.10
 const disableAll = [];
 function selectArgs(table, disableAll) {
   const labels = location.hostname.toLowerCase().split(".");
-  const hosts = labels.map((_, i) => labels.slice(i).join("."));
+  const hosts = [];
+  for (let i = 0; i < labels.length; i++) {
+    hosts.push(labels.slice(i).join("."));
+    // entity forms: "a.b.site.co.uk" also matches "site.*" (suffix of one or two labels)
+    for (let r = 1; r <= 2; r++) if (labels.length - i > r) hosts.push(labels.slice(i, labels.length - r).join(".") + ".*");
+  }
   if (hosts.some((h) => disableAll.includes(h))) return [];
   const excluded = new Set();
   for (const h of hosts) for (const i of table.exclude[h] || []) excluded.add(i);
