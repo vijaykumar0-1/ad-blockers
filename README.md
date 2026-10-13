@@ -26,11 +26,11 @@ Needs macOS with Safari 26 or later, [Xcode](https://apps.apple.com/app/xcode/id
 npm run safari   # same as: bash safari/build.sh
 ```
 
-This bundles the extension for Safari (`tools/build-safari.mjs` → `dist/safari`), wraps it in a small Mac app with Apple's `safari-web-extension-converter`, builds it with Xcode and opens it. Then:
+This bundles the extension for Safari (`tools/build-safari.mjs` → `dist/safari`), wraps it in a small Mac app with Apple's `safari-web-extension-converter`, builds it with Xcode, installs it as `~/Applications/LocalBlock.app` and opens it.
 
-1. Safari > Settings > Advanced: tick **Show features for web developers**.
-2. Safari > Settings > Developer: tick **Allow unsigned extensions**. Safari clears this each time it quits, because the app is built on your Mac rather than signed by a paid Apple developer account.
-3. Safari > Settings > Extensions: tick **LocalBlock** and choose **Always Allow on Every Website**.
+**Sign in to Xcode once so Safari keeps LocalBlock enabled.** Safari ignores extensions that aren't signed with a development certificate, and its "Allow unsigned extensions" switch resets every time Safari quits. A free Apple ID is enough: Xcode > Settings > Accounts > **+** > Apple ID. The build script finds the resulting "Apple Development" certificate and signs the app with it (set `TEAM_ID=...` to pick a team, or `UNSIGNED=1` to skip signing). Then, once: Safari > Settings > Extensions, tick **LocalBlock** and choose **Always Allow on Every Website**.
+
+Without signing in, the app is unsigned and you also need, after every Safari restart: Safari > Settings > Advanced, tick **Show features for web developers**; then Safari > Settings > Developer, tick **Allow unsigned extensions**.
 
 ## Updating the filter lists
 
