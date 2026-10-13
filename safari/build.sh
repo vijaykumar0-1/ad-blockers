@@ -74,6 +74,8 @@ BUILT=$(find safari/build/Build/Products/Release -maxdepth 1 -name "*.app" | hea
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/LocalBlock.app"
 cp -R "$BUILT" "$HOME/Applications/LocalBlock.app"
+# Leave only the installed copy: every LocalBlock.app on disk shows up in Safari separately.
+rm -rf "$BUILT"
 open "$HOME/Applications/LocalBlock.app"
 
 if [ -n "$TEAM" ]; then

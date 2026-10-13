@@ -30,6 +30,8 @@ This bundles the extension for Safari (`tools/build-safari.mjs` → `dist/safari
 
 **Sign in to Xcode once so Safari keeps LocalBlock enabled.** Safari ignores extensions that aren't signed with a development certificate, and its "Allow unsigned extensions" switch resets every time Safari quits. A free Apple ID is enough: Xcode > Settings > Accounts > **+** > Apple ID. The build script finds the resulting "Apple Development" certificate and signs the app with it (set `TEAM_ID=...` to pick a team, or `UNSIGNED=1` to skip signing). Then, once: Safari > Settings > Extensions, tick **LocalBlock** and choose **Always Allow on Every Website**.
 
+If Safari lists LocalBlock twice, another copy of the app is still on disk (for example from an older build). `pluginkit -mAv -p com.apple.Safari.web-extension | grep -i localblock` shows where each one lives; delete all but `~/Applications/LocalBlock.app`.
+
 Without signing in, the app is unsigned and you also need, after every Safari restart: Safari > Settings > Advanced, tick **Show features for web developers**; then Safari > Settings > Developer, tick **Allow unsigned extensions**.
 
 ## Updating the filter lists
