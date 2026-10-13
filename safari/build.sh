@@ -34,7 +34,8 @@ if [ -z "$TEAM" ] && [ -z "${UNSIGNED:-}" ]; then TEAM="$(detect_team || true)";
 
 # A personal team needs a bundle identifier no one else has registered, so make it per user.
 USER_ID=$(whoami | tr -cd 'a-zA-Z0-9' | tr 'A-Z' 'a-z')
-BUNDLE_ID="${BUNDLE_ID:-com.${USER_ID:-local}.localblock}"
+# The converter names the app's identifier after the app ("....LocalBlock"), so end with that.
+BUNDLE_ID="${BUNDLE_ID:-com.${USER_ID:-local}.LocalBlock}"
 
 node tools/build-safari.mjs
 
@@ -47,6 +48,15 @@ xcrun safari-web-extension-converter dist/safari \
   --macos-only --swift --copy-resources --no-open --no-prompt --force
 
 PROJECT=$(find safari/xcode -maxdepth 2 -name "*.xcodeproj" | head -1)
+
+# Xcode requires the extension's identifier to start with the app's. Make it "<app>.Extension"
+# whatever spelling the converter chose for each.
+PBX="$PROJECT/project.pbxproj"
+APP_ID=$(perl -ne 'print "$1\n" if /PRODUCT_BUNDLE_IDENTIFIER = "?([^";]+)"?;/ && $1 !~ /\.Extension$/' "$PBX" | head -1)
+if [ -n "$APP_ID" ]; then
+  APP_ID="$APP_ID" perl -pi -e 's/(PRODUCT_BUNDLE_IDENTIFIER = )"?[^";]+\.Extension"?;/$1"$ENV{APP_ID}.Extension";/' "$PBX"
+fi
+echo "Bundle identifiers:"; grep -o 'PRODUCT_BUNDLE_IDENTIFIER = [^;]*' "$PBX" | sort -u | sed 's/^/  /'
 SCHEME=$(xcodebuild -list -project "$PROJECT" | awk '/Schemes:/{getline; gsub(/^[ \t]+/, ""); print; exit}')
 
 if [ -n "$TEAM" ]; then
